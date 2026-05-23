@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 const platforms = ['instagram', 'tiktok', 'youtube', 'twitter', 'facebook', 'telegram', 'snapchat', 'linkedin', 'custom'];
@@ -15,6 +16,8 @@ const emptyForm = {
 
 export default function ResellerServices({ user }) {
   const [services, setServices] = useState([]);
+
+  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -76,13 +79,19 @@ export default function ResellerServices({ user }) {
   };
 
   const deleteService = async (id) => {
-    if (!window.confirm('Delete this service?')) return;
+    const ok = await confirm({ title:'Delete Service?', message:'This service will be permanently deleted.', confirmText:'Delete', confirmColor:'danger', icon:'🗑️' });
+    if (!ok) return;
     await supabase.from('services').delete().eq('id', id);
     loadServices();
   };
 
   return (
     <div>
+      <ConfirmModal
+        {...confirmState}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div className="st" style={{ marginBottom: 0 }}>My Services</div>
         <button className="btn bp bmd" onClick={openCreate}>+ Create Service</button>
