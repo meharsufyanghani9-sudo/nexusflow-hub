@@ -20,7 +20,7 @@ export default function AdminOrders() {
     setMsg('');
     const { data, error } = await supabase
       .from('orders')
-      .select('*, users(full_name, email)')
+      .select('*, user:users!orders_user_id_fkey(full_name, email)')
       .order('created_at', { ascending: false });
     if (error) {
       setMsg('❌ Error loading orders: ' + error.message);
@@ -77,8 +77,8 @@ export default function AdminOrders() {
       (o.order_ref || '').toLowerCase().includes(search.toLowerCase()) ||
       (o.service_name || '').toLowerCase().includes(search.toLowerCase()) ||
       (o.link || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.users?.email || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.users?.full_name || '').toLowerCase().includes(search.toLowerCase());
+      (o.user?.email || '').toLowerCase().includes(search.toLowerCase()) ||
+      (o.user?.full_name || '').toLowerCase().includes(search.toLowerCase());
     return matchStatus && matchSearch;
   });
 
@@ -175,8 +175,8 @@ export default function AdminOrders() {
                       {o.provider_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.provider_order_id}</div>}
                     </td>
                     <td style={{ fontSize: '11px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.users?.full_name || '—'}</div>
-                      <div style={{ color: 'var(--text3)', fontSize: '9px' }}>{(o.users?.email || '').slice(0, 18)}</div>
+                      <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.user?.full_name || '—'}</div>
+                      <div style={{ color: 'var(--text3)', fontSize: '9px' }}>{(o.user?.email || '').slice(0, 18)}</div>
                     </td>
                     <td style={{ fontWeight: 600, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>
                       {o.service_name}
