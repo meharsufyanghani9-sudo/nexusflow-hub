@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
@@ -10,6 +11,8 @@ export default function AdminOrders() {
   const [search, setSearch] = useState('');
   const [msg, setMsg] = useState('');
   const [updating, setUpdating] = useState(null);
+
+  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [page, setPage] = useState(1);
   const PER_PAGE = 30;
 
@@ -49,7 +52,8 @@ export default function AdminOrders() {
   };
 
   const refundOrder = async (order) => {
-    if (!window.confirm(`Refund $${parseFloat(order.cost || 0).toFixed(2)} and cancel order?`)) return;
+    const ok = await confirm({ title:'Refund & Cancel?', message:`Refund $${parseFloat(order.cost||0).toFixed(2)} and cancel this order?`, confirmText:'Yes, Refund', confirmColor:'danger', icon:'💸' });
+    if (!ok) return;
     setUpdating(order.id);
     const { data: profile } = await supabase
       .from('users').select('balance').eq('id', order.user_id).maybeSingle();
@@ -95,6 +99,11 @@ export default function AdminOrders() {
 
   return (
     <div>
+      <ConfirmModal
+        {...confirmState}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
       {msg && (
         <div style={{
           background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : 'rgba(255,50,80,.08)',
@@ -222,7 +231,7 @@ export default function AdminOrders() {
                             💸 Refund
                           </button>
                         )}
-                        {o.refill_requested && (
+                        {o.refill_requested && o.status !== 'cancelled' && (
                           <span style={{ fontSize: '9px', color: 'var(--gold)', whiteSpace: 'nowrap', padding: '4px' }}>
                             🔁 Refill req.
                           </span>
