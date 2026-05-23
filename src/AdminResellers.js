@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 import AdminCreateReseller from './AdminCreateReseller';
 
 export default function AdminResellers() {
   const [resellers, setResellers] = useState([]);
+
+  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
@@ -87,14 +90,16 @@ export default function AdminResellers() {
   };
 
   const deleteService = async (id) => {
-    if (!window.confirm('Delete this service?')) return;
+    const ok = await confirm({ title:'Delete Service?', message:'This service will be permanently deleted.', confirmText:'Delete', confirmColor:'danger', icon:'🗑️' });
+    if (!ok) return;
     await supabase.from('services').delete().eq('id', id);
     const { data } = await supabase.from('services').select('*').eq('vendor_id', selected.id);
     if (data) setServices(data);
   };
 
   const demoteToBuyer = async () => {
-    if (!window.confirm(`Demote ${selected.full_name} to Buyer? They will lose reseller access.`)) return;
+    const ok = await confirm({ title:'Demote to Buyer?', message:`${selected.full_name} will lose all reseller access.`, confirmText:'Demote', confirmColor:'danger', icon:'⬇️' });
+    if (!ok) return;
     setActing(true);
     await supabase.from('users').update({ role: 'buyer' }).eq('id', selected.id);
     setActing(false);
@@ -104,7 +109,8 @@ export default function AdminResellers() {
   };
 
   const promoteToAdmin = async () => {
-    if (!window.confirm(`Promote ${selected.full_name} to Admin? They will have full access.`)) return;
+    const ok = await confirm({ title:'Promote to Admin?', message:`${selected.full_name} will get full admin access.`, confirmText:'Promote', confirmColor:'success', icon:'⬆️' });
+    if (!ok) return;
     setActing(true);
     await supabase.from('users').update({ role: 'admin' }).eq('id', selected.id);
     setActing(false);
@@ -148,6 +154,11 @@ export default function AdminResellers() {
 
   return (
     <div>
+      <ConfirmModal
+        {...confirmState}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
       {showCreate && (
         <AdminCreateReseller
           onClose={() => setShowCreate(false)}
