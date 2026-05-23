@@ -64,10 +64,9 @@ export default function Orders({ user }) {
   };
 
   const canRefill = (order) => {
-    if (order.status !== 'in_progress') return false;
-    const created = new Date(order.created_at);
-    const diff = new Date() - created;
-    return diff < 24 * 60 * 60 * 1000; // 24 hours window
+    if (order.status !== 'completed') return false;
+    const diff = new Date() - new Date(order.created_at);
+    return diff < 7 * 24 * 60 * 60 * 1000; // 7 days window
   };
 
   const cancelOrder = async (order) => {
