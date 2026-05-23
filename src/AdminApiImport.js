@@ -24,7 +24,7 @@ const mapPlatform = (cat = '') => {
   return 'custom';
 };
 
-const PROXY = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
+const PROXY = '/api/proxy';
 
 export default function AdminApiImport() {
   const [tab, setTab] = useState('import');
@@ -68,10 +68,7 @@ export default function AdminApiImport() {
       // Use our proxy to bypass CORS
       const res = await fetch(PROXY, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: apiUrl,
           key: apiKey,
