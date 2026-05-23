@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 const platforms = [
@@ -15,6 +16,8 @@ const empty = {
 
 export default function AdminServices() {
   const [services, setServices] = useState([]);
+
+  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(empty);
@@ -123,7 +126,8 @@ export default function AdminServices() {
   };
 
   const bulkDelete = async () => {
-    if (!window.confirm(`Delete ${selectedIds.length} selected service(s)? This cannot be undone.`)) return;
+    const ok = await confirm({ title:'Delete Services?', message:`Delete ${selectedIds.length} selected service(s)? This cannot be undone.`, confirmText:'Delete All', confirmColor:'danger', icon:'🗑️' });
+    if (!ok) return;
     setBulkActing(true);
     await supabase.from('services').delete().in('id', selectedIds);
     setMsg(`🗑 ${selectedIds.length} service(s) deleted.`);
@@ -188,7 +192,8 @@ export default function AdminServices() {
   };
 
   const deleteService = async (id) => {
-    if (!window.confirm('Delete this service? This cannot be undone.')) return;
+    const ok = await confirm({ title:'Delete Service?', message:'This service will be permanently deleted.', confirmText:'Delete', confirmColor:'danger', icon:'🗑️' });
+    if (!ok) return;
     await supabase.from('services').delete().eq('id', id);
     loadServices();
     setMsg('🗑 Service deleted.');
@@ -219,6 +224,11 @@ export default function AdminServices() {
 
   return (
     <div>
+      <ConfirmModal
+        {...confirmState}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
       {msg && !modal && (
         <div style={{
           background: msg.startsWith('✅') || msg.startsWith('⭐') ? 'rgba(0,255,136,.08)' : msg.startsWith('🗑') ? 'rgba(255,100,0,.08)' : 'rgba(255,50,80,.08)',
