@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 const providers = [
@@ -29,6 +30,8 @@ const PROXY = '/api/proxy';
 export default function AdminApiImport() {
   const [tab, setTab] = useState('import');
   const [provider, setProvider] = useState('jap');
+
+  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [apiKey, setApiKey] = useState('');
   const [apiUrl, setApiUrl] = useState(providers[0].url);
   const [fetchedServices, setFetchedServices] = useState([]);
@@ -170,7 +173,8 @@ export default function AdminApiImport() {
   };
 
   const deleteApiKey = async (id) => {
-    if (!window.confirm('Delete this API key?')) return;
+    const ok = await confirm({ title:'Delete API Key?', message:'This API key will be permanently deleted.', confirmText:'Delete', confirmColor:'danger', icon:'🔑' });
+    if (!ok) return;
     await supabase.from('api_keys').delete().eq('id', id);
     loadApiKeys();
   };
@@ -186,6 +190,11 @@ export default function AdminApiImport() {
 
   return (
     <div>
+      <ConfirmModal
+        {...confirmState}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
       <div className="atbs" style={{ marginBottom: '16px' }}>
         <button className={`atb ${tab === 'import' ? 'on' : ''}`} onClick={() => setTab('import')}>
           Import Services
