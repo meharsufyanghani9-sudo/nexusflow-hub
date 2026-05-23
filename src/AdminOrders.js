@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
@@ -12,8 +12,26 @@ export default function AdminOrders() {
   const [updating, setUpdating] = useState(null);
   const [page, setPage] = useState(1);
   const PER_PAGE = 30;
+  const channelRef = useRef(null);
 
-  useEffect(() => { loadOrders(); }, []);
+  useEffect(() => {
+    loadOrders();
+
+    // FIXED: Real-time subscription so orders appear LIVE without refresh
+    const ch = supabase
+      .channel('admin-orders-live')
+      .on('postgres_changes', {
+        event: '*',        // INSERT, UPDATE, DELETE
+        schema: 'public',
+        table: 'orders',
+      }, () => {
+        loadOrders();      // reload whenever any order changes
+      })
+      .subscribe();
+
+    channelRef.current = ch;
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+  }, []);
 
   const loadOrders = async () => {
     setLoading(true);
@@ -27,23 +45,20 @@ export default function AdminOrders() {
 
   const updateStatus = async (orderId, newStatus) => {
     setUpdating(orderId);
-    // FIX: removed updated_at — that column does not exist in the orders table
     const { error } = await supabase
-      .from('orders')
-      .update({ status: newStatus })
-      .eq('id', orderId);
+      .from('orders').update({ status: newStatus }).eq('id', orderId);
     if (!error) {
-      setMsg(`✅ Order updated to "${newStatus}"`);
-      loadOrders();
+      setMsg(`✅ Updated to "${newStatus}"`);
       setTimeout(() => setMsg(''), 3000);
     } else {
-      setMsg('❌ Update failed: ' + error.message);
+      setMsg('❌ ' + error.message);
     }
     setUpdating(null);
+    loadOrders();
   };
 
   const refundOrder = async (order) => {
-    if (!window.confirm(`Refund $${parseFloat(order.cost || 0).toFixed(2)} and cancel order?`)) return;
+    if (!window.confirm(`Refund $${parseFloat(order.cost || 0).toFixed(2)} and cancel?`)) return;
     setUpdating(order.id);
     const { data: profile } = await supabase
       .from('users').select('balance').eq('id', order.user_id).single();
@@ -51,28 +66,28 @@ export default function AdminOrders() {
       const newBal = parseFloat(profile.balance || 0) + parseFloat(order.cost || 0);
       await supabase.from('users').update({ balance: newBal }).eq('id', order.user_id);
       await supabase.from('transactions').insert({
-        user_id: order.user_id,
-        type: 'refund',
+        user_id: order.user_id, type: 'refund',
         amount: parseFloat(order.cost || 0),
-        description: `Refund: Order ${order.order_ref || order.id}`,
+        description: `Refund: ${order.order_ref || order.id}`,
         ref_id: order.order_ref,
       });
     }
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id);
-    setMsg('✅ Order refunded and cancelled.');
-    loadOrders();
+    setMsg('✅ Refunded and cancelled.');
     setTimeout(() => setMsg(''), 4000);
     setUpdating(null);
+    loadOrders();
   };
 
   const filtered = orders.filter(o => {
     const matchStatus = filter === 'all' || o.status === filter;
-    const matchSearch = !search ||
-      (o.order_ref || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.service_name || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.link || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.users?.email || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.users?.full_name || '').toLowerCase().includes(search.toLowerCase());
+    const s = search.toLowerCase();
+    const matchSearch = !s ||
+      (o.order_ref || '').toLowerCase().includes(s) ||
+      (o.service_name || '').toLowerCase().includes(s) ||
+      (o.link || '').toLowerCase().includes(s) ||
+      (o.users?.email || '').toLowerCase().includes(s) ||
+      (o.users?.full_name || '').toLowerCase().includes(s);
     return matchStatus && matchSearch;
   });
 
@@ -99,13 +114,19 @@ export default function AdminOrders() {
         }}>{msg}</div>
       )}
 
+      {/* Live indicator */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', fontSize: '11px', color: 'var(--text3)' }}>
+        <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--green)', display: 'inline-block', animation: 'pulse 2s infinite' }} />
+        Live — updates automatically
+      </div>
+
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '📦', lb: 'Total Orders', vl: stats.total,                       cl: 'cn'  },
-          { ic: '⏳', lb: 'Pending',      vl: stats.pending,                      cl: 'cw'  },
-          { ic: '⚡', lb: 'In Progress',  vl: stats.inProgress,                   cl: 'cn'  },
-          { ic: '✅', lb: 'Completed',    vl: stats.completed,                     cl: 'cg'  },
-          { ic: '💰', lb: 'Revenue',      vl: `$${stats.revenue.toFixed(2)}`,      cl: 'cgo' },
+          { ic: '📦', lb: 'Total',       vl: stats.total,                     cl: 'cn'  },
+          { ic: '⏳', lb: 'Pending',     vl: stats.pending,                   cl: 'cw'  },
+          { ic: '⚡', lb: 'In Progress', vl: stats.inProgress,                cl: 'cn'  },
+          { ic: '✅', lb: 'Completed',   vl: stats.completed,                 cl: 'cg'  },
+          { ic: '💰', lb: 'Revenue',     vl: `$${stats.revenue.toFixed(2)}`,  cl: 'cgo' },
         ].map((s, i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -128,7 +149,7 @@ export default function AdminOrders() {
             style={{
               padding: '5px 12px', borderRadius: '20px', cursor: 'pointer',
               fontFamily: 'var(--fu)', fontSize: '10px', fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '1px', transition: '.15s',
+              textTransform: 'uppercase', letterSpacing: '1px',
               background: filter === s ? 'var(--neon)' : 'var(--gl)',
               color: filter === s ? '#000' : 'var(--text3)',
               border: filter === s ? 'none' : '1px solid var(--br)',
@@ -146,27 +167,19 @@ export default function AdminOrders() {
             <table>
               <thead>
                 <tr>
-                  <th>Order Ref</th>
-                  <th>User</th>
-                  <th>Service</th>
-                  <th>Link</th>
-                  <th>Qty</th>
-                  <th>Cost</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Actions</th>
+                  <th>Order Ref</th><th>User</th><th>Service</th>
+                  <th>Link</th><th>Qty</th><th>Cost</th>
+                  <th>Status</th><th>Date</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 ? (
-                  <tr>
-                    <td colSpan="9" style={{ textAlign: 'center', padding: '32px', color: 'var(--text3)' }}>No orders found</td>
-                  </tr>
+                  <tr><td colSpan="9" style={{ textAlign: 'center', padding: '32px', color: 'var(--text3)' }}>No orders found</td></tr>
                 ) : paginated.map(o => (
                   <tr key={o.id}>
                     <td style={{ fontFamily: 'var(--fm)', color: 'var(--neon)', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.order_ref || o.id}
-                      {o.provider_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.provider_order_id}</div>}
+                      {o.vendor_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.vendor_order_id}</div>}
                     </td>
                     <td style={{ fontSize: '11px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.users?.full_name || '—'}</div>
@@ -176,8 +189,7 @@ export default function AdminOrders() {
                       {o.service_name}
                     </td>
                     <td style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <a href={o.link} target="_blank" rel="noreferrer"
-                        style={{ color: 'var(--neon)', fontSize: '10px', textDecoration: 'none' }}>
+                      <a href={o.link} target="_blank" rel="noreferrer" style={{ color: 'var(--neon)', fontSize: '10px', textDecoration: 'none' }}>
                         {o.link ? '🔗 View' : '—'}
                       </a>
                     </td>
@@ -186,9 +198,7 @@ export default function AdminOrders() {
                       ${parseFloat(o.cost || 0).toFixed(2)}
                     </td>
                     <td>
-                      <select
-                        value={o.status}
-                        disabled={updating === o.id}
+                      <select value={o.status} disabled={updating === o.id}
                         onChange={e => updateStatus(o.id, e.target.value)}
                         style={{
                           background: 'var(--bg2)', border: '1px solid var(--br)',
@@ -217,9 +227,10 @@ export default function AdminOrders() {
                           </button>
                         )}
                         {o.refill_requested && (
-                          <span style={{ fontSize: '9px', color: 'var(--gold)', whiteSpace: 'nowrap', padding: '4px' }}>
-                            🔁 Refill req.
-                          </span>
+                          <span style={{ fontSize: '9px', color: 'var(--gold)', padding: '4px' }}>🔁 Refill</span>
+                        )}
+                        {o.provider_note && (
+                          <span title={o.provider_note} style={{ fontSize: '9px', color: 'var(--danger)', padding: '4px', cursor: 'help' }}>⚠️</span>
                         )}
                       </div>
                     </td>
