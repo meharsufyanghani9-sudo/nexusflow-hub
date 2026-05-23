@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 export default function AdminMassEmail() {
   const [subject, setSubject] = useState('');
+
+  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState('');
@@ -14,7 +17,8 @@ export default function AdminMassEmail() {
       setResult('❌ Please fill in both subject and message.');
       return;
     }
-    if (!window.confirm(`Send email to all ${targetRole === 'all' ? 'users' : targetRole + 's'}? This cannot be undone.`)) return;
+    const ok = await confirm({ title:'Send Mass Email?', message:`Send to all ${targetRole === 'all' ? 'users' : targetRole + 's'}? This cannot be undone.`, confirmText:'Send Now', confirmColor:'success', icon:'📧' });
+    if (!ok) return;
 
     setSending(true);
     setResult('');
@@ -74,6 +78,11 @@ export default function AdminMassEmail() {
 
   return (
     <div style={{ maxWidth: '640px' }}>
+      <ConfirmModal
+        {...confirmState}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
       <div className="st">📨 Mass Email</div>
       <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '20px' }}>
         Send an email to all users or a specific group. Requires Supabase Edge Function "send-email" to be set up.
