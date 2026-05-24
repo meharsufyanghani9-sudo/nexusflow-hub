@@ -4,9 +4,9 @@ import { supabase } from './supabase';
 const CurrencyContext = createContext();
 
 export function CurrencyProvider({ children }) {
-  // Default is PKR — the platform's base deposit currency
+  // Default is PKR — user can change via currency switcher
   const [currency, setCurrency] = useState({
-    code: 'PKR', symbol: '₨', name: 'Pakistani Rupee', rate: 278
+    code: 'PKR', symbol: 'Rs', name: 'Pakistani Rupee', rate: 278
   });
   const [allCurrencies, setAllCurrencies] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -19,13 +19,13 @@ export function CurrencyProvider({ children }) {
       .eq('is_active', true).order('code');
     if (data && data.length > 0) {
       setAllCurrencies(data);
-      // Check if user previously selected a currency
       const saved = localStorage.getItem('nf_currency_code');
       if (saved) {
+        // Respect user's saved preference
         const found = data.find(c => c.code === saved);
         if (found) { setCurrency(found); setLoaded(true); return; }
       }
-      // Default to PKR if available, otherwise first currency
+      // No saved preference — use PKR if available, else first currency
       const pkr = data.find(c => c.code === 'PKR');
       if (pkr) setCurrency(pkr);
       else setCurrency(data[0]);
@@ -38,29 +38,22 @@ export function CurrencyProvider({ children }) {
     localStorage.setItem('nf_currency_code', curr.code);
   };
 
-  // format converts a USD amount to the user's selected currency
-  // Deposits are stored in their actual currency (PKR or USDT)
-  // Services/orders are priced in USD internally
   const format = (usdAmount) => {
     const amt = parseFloat(usdAmount) || 0;
     const converted = amt * parseFloat(currency.rate || 1);
-    const decimals = ['USD', 'EUR', 'GBP', 'AED', 'SAR'].includes(currency.code) ? 2 : 0;
-    return `${currency.symbol}${converted.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+    const decimals = ['USD', 'EUR', 'GBP'].includes(currency.code) ? 2 : 0;
+    return `${currency.symbol}${converted.toFixed(decimals)}`;
   };
 
-  // formatDeposit: show deposit amounts in their stored currency (NOT converted)
-  // Deposits stored as PKR stay as PKR, USDT stays as USDT
-  const formatDeposit = (amount, method) => {
-    const amt = parseFloat(amount) || 0;
-    if (method && (method.toLowerCase().includes('binance') || method.toLowerCase().includes('usdt'))) {
-      return `$${amt.toFixed(2)} USDT`;
-    }
-    // PKR/Easypaisa/JazzCash
-    return `₨${amt.toLocaleString()} PKR`;
+  // Format with explicit decimals control
+  const formatFixed = (usdAmount, dec = 2) => {
+    const amt = parseFloat(usdAmount) || 0;
+    const converted = amt * parseFloat(currency.rate || 1);
+    return `${currency.symbol}${converted.toFixed(dec)}`;
   };
 
   return (
-    <CurrencyContext.Provider value={{ currency, allCurrencies, changeCurrency, format, formatDeposit, loadCurrencies, loaded }}>
+    <CurrencyContext.Provider value={{ currency, allCurrencies, changeCurrency, format, formatFixed, loadCurrencies, loaded }}>
       {children}
     </CurrencyContext.Provider>
   );
