@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 const platforms = [
@@ -12,12 +11,11 @@ const empty = {
   price_per_1k: '', min_qty: 100, max_qty: 10000,
   is_active: true, is_featured: false, category: '',
   provider_id: '', provider_service_id: '', provider_api_url: '', provider_api_key: '',
+  has_refill: false, refill_days: 30,
 };
 
 export default function AdminServices() {
   const [services, setServices] = useState([]);
-
-  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(empty);
@@ -43,8 +41,21 @@ export default function AdminServices() {
 
   const loadServices = async () => {
     setLoading(true);
-    const { data } = await supabase.from('services').select('*').order('created_at', { ascending: false });
-    if (data) setServices(data);
+    // Paginate to load ALL services — bypasses the 1000-row Supabase default limit
+    let allData = [];
+    let from = 0;
+    const PAGE = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('services').select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error || !data || data.length === 0) break;
+      allData = [...allData, ...data];
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    setServices(allData);
     setLoading(false);
     setSelected(new Set()); // clear selection on reload
   };
@@ -126,8 +137,7 @@ export default function AdminServices() {
   };
 
   const bulkDelete = async () => {
-    const ok = await confirm({ title:'Delete Services?', message:`Delete ${selectedIds.length} selected service(s)? This cannot be undone.`, confirmText:'Delete All', confirmColor:'danger', icon:'🗑️' });
-    if (!ok) return;
+    if (!window.confirm(`Delete ${selectedIds.length} selected service(s)? This cannot be undone.`)) return;
     setBulkActing(true);
     await supabase.from('services').delete().in('id', selectedIds);
     setMsg(`🗑 ${selectedIds.length} service(s) deleted.`);
@@ -149,6 +159,8 @@ export default function AdminServices() {
       provider_service_id: s.provider_service_id || '',
       provider_api_url: s.provider_api_url || '',
       provider_api_key: s.provider_api_key || '',
+      has_refill: s.has_refill || false,
+      refill_days: s.refill_days || 30,
     });
     setEditing(s.id);
     setMsg('');
@@ -168,6 +180,8 @@ export default function AdminServices() {
       provider_service_id: form.provider_service_id,
       provider_api_url: form.provider_api_url,
       provider_api_key: form.provider_api_key,
+      has_refill: form.has_refill,
+      refill_days: parseInt(form.refill_days) || 30,
     };
     let error;
     if (editing) {
@@ -192,8 +206,7 @@ export default function AdminServices() {
   };
 
   const deleteService = async (id) => {
-    const ok = await confirm({ title:'Delete Service?', message:'This service will be permanently deleted.', confirmText:'Delete', confirmColor:'danger', icon:'🗑️' });
-    if (!ok) return;
+    if (!window.confirm('Delete this service? This cannot be undone.')) return;
     await supabase.from('services').delete().eq('id', id);
     loadServices();
     setMsg('🗑 Service deleted.');
@@ -224,11 +237,6 @@ export default function AdminServices() {
 
   return (
     <div>
-      <ConfirmModal
-        {...confirmState}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
-      />
       {msg && !modal && (
         <div style={{
           background: msg.startsWith('✅') || msg.startsWith('⭐') ? 'rgba(0,255,136,.08)' : msg.startsWith('🗑') ? 'rgba(255,100,0,.08)' : 'rgba(255,50,80,.08)',
@@ -464,7 +472,7 @@ export default function AdminServices() {
               </div>
             </div>
 
-            <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', marginTop: '6px' }}>Visibility</div>
+            <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', marginTop: '6px' }}>Visibility & Refill</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
               {[
                 { key: 'is_active', label: '✅ Active', desc: 'Visible to buyers on marketplace' },
@@ -486,6 +494,31 @@ export default function AdminServices() {
                   <div style={{ fontSize: '9px', color: 'var(--text3)', paddingLeft: '24px' }}>{opt.desc}</div>
                 </div>
               ))}
+            </div>
+
+            {/* Refill Guarantee */}
+            <div className="card" style={{ padding: '12px', marginBottom: '12px', cursor: 'pointer' }}
+              onClick={() => setForm(f => ({ ...f, has_refill: !f.has_refill }))}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: f.has_refill ? '8px' : '0' }}>
+                <div style={{
+                  width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0,
+                  border: `2px solid ${form.has_refill ? 'var(--green)' : 'var(--br2)'}`,
+                  background: form.has_refill ? 'var(--green)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  {form.has_refill && <span style={{ fontSize: '10px', color: '#000', fontWeight: 900 }}>✓</span>}
+                </div>
+                <span style={{ fontSize: '11px', fontWeight: 700 }}>🔄 Refill Guarantee</span>
+                <span style={{ fontSize: '10px', color: 'var(--text3)' }}>Buyers can request refill if drops</span>
+              </div>
+              {form.has_refill && (
+                <div style={{ paddingLeft: '24px' }} onClick={e => e.stopPropagation()}>
+                  <label className="fl" style={{ fontSize: '10px' }}>Refill Guarantee (days)</label>
+                  <input className="inp" type="number" value={form.refill_days}
+                    onChange={e => setForm(f => ({ ...f, refill_days: e.target.value }))}
+                    placeholder="30" style={{ marginTop: '4px' }} />
+                </div>
+              )}
             </div>
 
             <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '6px', marginTop: '6px' }}>
