@@ -64,9 +64,15 @@ export default function Orders({ user }) {
   };
 
   const canRefill = (order) => {
+    // Refill only available on COMPLETED orders that have a refill guarantee
     if (order.status !== 'completed') return false;
-    const diff = new Date() - new Date(order.created_at);
-    return diff < 7 * 24 * 60 * 60 * 1000; // 7 days window
+    // Service must have refill guarantee
+    if (!order.has_refill) return false;
+    // Must be within the refill window (default 30 days)
+    const refillDays = order.refill_days || 30;
+    const completed = new Date(order.updated_at || order.created_at);
+    const diff = new Date() - completed;
+    return diff < refillDays * 24 * 60 * 60 * 1000;
   };
 
   const cancelOrder = async (order) => {
