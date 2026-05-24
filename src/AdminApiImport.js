@@ -25,7 +25,7 @@ const mapPlatform = (cat = '') => {
   return 'custom';
 };
 
-const PROXY = '/api/proxy';
+const PROXY = 'https://nexusflow-proxy.meharsufyanghani10.workers.dev';
 
 export default function AdminApiImport() {
   const [tab, setTab] = useState('import');
