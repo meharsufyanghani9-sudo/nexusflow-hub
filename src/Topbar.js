@@ -3,7 +3,6 @@ import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
 export default function Topbar({ user, page, onNav, onLogout, onCurrency, onTheme, darkMode, setSbOpen }) {
-  const { currency, format } = useCurrency(); // FIXED: use live currency from context
   const [dropOpen, setDropOpen] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
   const [subject, setSubject] = useState('');
@@ -13,6 +12,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
   const [whatsapp, setWhatsapp] = useState('');
   const [telegram, setTelegram] = useState('');
   const dropRef = useRef(null);
+  const { format, currency } = useCurrency();
 
   const pageTitles = {
     dashboard: 'Dashboard', marketplace: 'Marketplace', orders: 'My Orders',
@@ -22,8 +22,8 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
     users: 'All Users', resellers: 'Resellers', api: 'API Import',
     disputes: 'Disputes', settings: 'Settings', admintasks: 'Manage Tasks',
     adminreferral: 'Referral Settings', support: 'Support Tickets',
-    currencies: 'Currency Rates', massemail: 'Mass Email',
-    adminorders: 'Manage Orders', adminservices: 'Manage Services',
+    currencies: 'Currency Rates', adminservices: 'Manage Services',
+    adminorders: 'Manage Orders', massemail: 'Mass Email',
   };
 
   useEffect(() => {
@@ -50,7 +50,8 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
   const getTelegramUrl = (val) => {
     if (!val) return '';
     if (val.startsWith('http')) return val;
-    return `https://t.me/${val.replace(/^@/, '')}`;
+    const clean = val.replace(/^@/, '');
+    return `https://t.me/${clean}`;
   };
 
   const sendTicket = async () => {
@@ -65,21 +66,23 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
     setTimeout(() => { setSent(false); setShowSupport(false); }, 2500);
   };
 
-  const roleColor = user.role === 'admin' ? 'var(--purple)'
-    : user.role === 'reseller' ? 'var(--gold)' : 'var(--neon)';
+  const roleColor = user.role === 'admin' ? 'var(--purple)' : user.role === 'reseller' ? 'var(--gold)' : 'var(--neon)';
 
   const dropItems = [
-    { ic: '👤', lb: 'My Profile',      fn: () => { onNav('profile');      setDropOpen(false); } },
+    { ic: '👤', lb: 'My Profile', fn: () => { onNav('profile'); setDropOpen(false); } },
     ...(user.role === 'buyer' ? [
-      { ic: '📦', lb: 'My Orders',     fn: () => { onNav('orders');       setDropOpen(false); } },
-      { ic: '💳', lb: 'Add Funds',     fn: () => { onNav('deposit');      setDropOpen(false); } },
-      { ic: '🎁', lb: 'Referral',      fn: () => { onNav('referral');     setDropOpen(false); } },
+      { ic: '📦', lb: 'My Orders', fn: () => { onNav('orders'); setDropOpen(false); } },
+      { ic: '💳', lb: 'Add Funds', fn: () => { onNav('deposit'); setDropOpen(false); } },
+      { ic: '🎁', lb: 'Referral', fn: () => { onNav('referral'); setDropOpen(false); } },
     ] : []),
-    { ic: '📊', lb: 'Transactions',    fn: () => { onNav('transactions'); setDropOpen(false); } },
-    { ic: '💱', lb: `Currency: ${currency.symbol} ${currency.code}`, fn: () => { onCurrency(); setDropOpen(false); } },
+    { ic: '📊', lb: 'Transactions', fn: () => { onNav('transactions'); setDropOpen(false); } },
+    { ic: '💱', lb: 'Change Currency', fn: () => { onCurrency(); setDropOpen(false); } },
     { ic: darkMode ? '☀️' : '🌙', lb: darkMode ? 'Light Mode' : 'Dark Mode', fn: () => { onTheme(); setDropOpen(false); } },
-    { ic: '🎧', lb: 'Support',         fn: () => { setShowSupport(true);  setDropOpen(false); } },
+    { ic: '🎧', lb: 'Support', fn: () => { setShowSupport(true); setDropOpen(false); } },
   ];
+
+  // Format balance in current currency
+  const balanceFormatted = format(user.balance);
 
   return (
     <>
@@ -92,25 +95,26 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
         </div>
 
         <div className="topbar-right">
-          {/* FIXED: Balance shows in selected currency (PKR by default) */}
+          {/* Balance in current currency */}
           <div className="bal-chip">
             <span className="bc-lbl">Balance</span>
-            <span className="bc-val">{format(user.balance)}</span>
+            <span className="bc-val">{balanceFormatted}</span>
           </div>
 
-          {/* Currency switcher button — shows current currency symbol */}
+          {/* Currency code button */}
           <button className="btn bgh bsm" onClick={onCurrency}
-            style={{ padding: '6px 8px', fontSize: '12px', fontFamily: 'var(--fm)' }} title="Switch Currency">
-            {currency.symbol}
+            style={{ padding: '6px 8px', fontSize: '12px', fontFamily: 'var(--fm)', fontWeight: 700 }}
+            title={`Currency: ${currency.code}`}>
+            {currency.code}
           </button>
 
-          {/* Theme */}
+          {/* Theme button */}
           <button className="btn bgh bsm" onClick={onTheme}
             style={{ padding: '6px 8px', fontSize: '14px' }} title="Theme">
             {darkMode ? '☀️' : '🌙'}
           </button>
 
-          {/* Avatar Dropdown */}
+          {/* Profile Dropdown Avatar */}
           <div ref={dropRef} style={{ position: 'relative' }}>
             <div onClick={() => setDropOpen(!dropOpen)} style={{
               width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer',
@@ -120,12 +124,12 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
               boxShadow: `0 0 10px ${roleColor}50`, border: `2px solid ${roleColor}60`,
               flexShrink: 0, userSelect: 'none', transition: 'all .2s',
             }}>
-              {(user.name || 'U')[0].toUpperCase()}
+              {user.name[0].toUpperCase()}
             </div>
 
             {dropOpen && (
               <div style={{
-                position: 'absolute', top: '40px', right: 0, width: '215px',
+                position: 'absolute', top: '40px', right: 0, width: '210px',
                 background: 'var(--bg2)', border: '1px solid var(--br2)',
                 borderRadius: '12px', padding: '5px', zIndex: 9999,
                 boxShadow: '0 16px 40px rgba(0,0,0,.75)',
@@ -138,8 +142,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                   <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '4px', wordBreak: 'break-all' }}>{user.email}</div>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                     <span className={`bdg b-${user.role}`}>{user.role}</span>
-                    {/* FIXED: balance in selected currency */}
-                    <span className="bdg b-completed">{format(user.balance)}</span>
+                    <span className="bdg b-completed">{balanceFormatted}</span>
                   </div>
                 </div>
 
@@ -147,7 +150,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                   <div key={i} onClick={item.fn} style={{
                     display: 'flex', alignItems: 'center', gap: '8px',
                     padding: '9px 12px', borderRadius: '7px', cursor: 'pointer',
-                    fontSize: '12px', color: 'var(--text2)', fontWeight: 600,
+                    fontSize: '12px', color: 'var(--text2)', fontWeight: 600, transition: 'all .15s',
                   }}
                   onMouseOver={e => e.currentTarget.style.background = 'var(--gl2)'}
                   onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
@@ -160,7 +163,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                   <div onClick={() => { onLogout(); setDropOpen(false); }} style={{
                     display: 'flex', alignItems: 'center', gap: '8px',
                     padding: '9px 12px', borderRadius: '7px', cursor: 'pointer',
-                    fontSize: '12px', color: 'var(--danger)', fontWeight: 700,
+                    fontSize: '12px', color: 'var(--danger)', fontWeight: 700, transition: 'all .15s',
                   }}
                   onMouseOver={e => e.currentTarget.style.background = 'rgba(255,51,85,.08)'}
                   onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
@@ -173,48 +176,69 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
         </div>
       </div>
 
-      {/* Telegram Floating Button */}
+      {/* ── Telegram Floating Button ── */}
       {telegram && (
-        <a href={getTelegramUrl(telegram)} target="_blank" rel="noreferrer"
+        <a href={getTelegramUrl(telegram)}
+          target="_blank" rel="noreferrer"
           style={{
-            position: 'fixed', bottom: `calc(var(--mnh) + 136px)`, right: '16px',
-            width: '48px', height: '48px', borderRadius: '50%', zIndex: 8000,
-            background: '#0088cc', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '22px', textDecoration: 'none', boxShadow: '0 4px 16px rgba(0,136,204,.5)',
+            position: 'fixed',
+            bottom: `calc(var(--mnh) + 136px)`,
+            right: '16px', width: '48px', height: '48px',
+            borderRadius: '50%', zIndex: 8000,
+            background: '#0088cc',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '22px', textDecoration: 'none',
+            boxShadow: '0 4px 16px rgba(0,136,204,.5)',
+            transition: 'transform .2s',
           }}
           onMouseOver={e => e.currentTarget.style.transform = 'scale(1.1)'}
           onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
-          title="Telegram Support">✈️</a>
+          title="Telegram Support">
+          ✈️
+        </a>
       )}
 
-      {/* WhatsApp Floating Button */}
+      {/* ── WhatsApp Floating Button ── */}
       {whatsapp && (
-        <a href={`https://wa.me/${whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+        <a href={`https://wa.me/${whatsapp.replace(/\D/g, '')}`}
+          target="_blank" rel="noreferrer"
           style={{
-            position: 'fixed', bottom: `calc(var(--mnh) + 76px)`, right: '16px',
-            width: '48px', height: '48px', borderRadius: '50%', zIndex: 8000,
-            background: '#25D366', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '22px', textDecoration: 'none', boxShadow: '0 4px 16px rgba(37,211,102,.5)',
+            position: 'fixed',
+            bottom: `calc(var(--mnh) + 76px)`,
+            right: '16px', width: '48px', height: '48px',
+            borderRadius: '50%', zIndex: 8000,
+            background: '#25D366',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '22px', textDecoration: 'none',
+            boxShadow: '0 4px 16px rgba(37,211,102,.5)',
+            transition: 'transform .2s',
           }}
           onMouseOver={e => e.currentTarget.style.transform = 'scale(1.1)'}
           onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
-          title="WhatsApp Support">💬</a>
+          title="WhatsApp Support">
+          💬
+        </a>
       )}
 
-      {/* Support Floating Button */}
+      {/* ── Support Floating Button ── */}
       <button onClick={() => setShowSupport(true)} style={{
-        position: 'fixed', bottom: `calc(var(--mnh) + 16px)`, right: '16px',
-        width: '48px', height: '48px', borderRadius: '50%', zIndex: 8000,
+        position: 'fixed',
+        bottom: `calc(var(--mnh) + 16px)`,
+        right: '16px', width: '48px', height: '48px',
+        borderRadius: '50%', zIndex: 8000,
         background: 'linear-gradient(135deg,var(--neon2),var(--purple))',
         border: 'none', cursor: 'pointer', fontSize: '20px',
         boxShadow: '0 4px 16px rgba(0,212,255,.4)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform .2s',
       }}
       onMouseOver={e => e.currentTarget.style.transform = 'scale(1.1)'}
       onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
-      title="Contact Support">🎧</button>
+      title="Contact Support">
+        🎧
+      </button>
 
-      {/* Support Modal */}
+      {/* ── Support Modal ── */}
       {showSupport && (
         <div className="mlay" onClick={e => e.target.classList.contains('mlay') && setShowSupport(false)}>
           <div className="mbox">
@@ -231,7 +255,8 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
             ) : (
               <>
                 {whatsapp && (
-                  <a href={`https://wa.me/${whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+                  <a href={`https://wa.me/${whatsapp.replace(/\D/g, '')}`}
+                    target="_blank" rel="noreferrer"
                     style={{ textDecoration: 'none', display: 'block', marginBottom: '8px' }}>
                     <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(37,211,102,.08)', border: '1px solid rgba(37,211,102,.25)', color: '#25D366', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>💬</span><span>Chat on WhatsApp →</span>
@@ -239,7 +264,8 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                   </a>
                 )}
                 {telegram && (
-                  <a href={getTelegramUrl(telegram)} target="_blank" rel="noreferrer"
+                  <a href={getTelegramUrl(telegram)}
+                    target="_blank" rel="noreferrer"
                     style={{ textDecoration: 'none', display: 'block', marginBottom: '12px' }}>
                     <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(0,136,204,.08)', border: '1px solid rgba(0,136,204,.25)', color: '#0088cc', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>✈️</span><span>Message on Telegram →</span>
@@ -251,11 +277,13 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                 </div>
                 <div className="fi">
                   <label className="fl">Subject</label>
-                  <input className="inp" placeholder="e.g. Order not delivered" value={subject} onChange={e => setSubject(e.target.value)} />
+                  <input className="inp" placeholder="e.g. Order not delivered"
+                    value={subject} onChange={e => setSubject(e.target.value)} />
                 </div>
                 <div className="fi">
                   <label className="fl">Message</label>
-                  <textarea className="inp" placeholder="Describe your issue..." value={message} onChange={e => setMessage(e.target.value)}
+                  <textarea className="inp" placeholder="Describe your issue..."
+                    value={message} onChange={e => setMessage(e.target.value)}
                     style={{ minHeight: '90px', resize: 'vertical', fontFamily: 'Rajdhani,sans-serif' }} />
                 </div>
                 <button className="btn bp blg bw" onClick={sendTicket} disabled={sending}>
