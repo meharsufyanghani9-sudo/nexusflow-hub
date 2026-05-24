@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 const providers = [
@@ -25,13 +24,11 @@ const mapPlatform = (cat = '') => {
   return 'custom';
 };
 
-const PROXY = 'https://nexusflow-proxy.meharsufyanghani10.workers.dev';
+const PROXY = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
 
 export default function AdminApiImport() {
   const [tab, setTab] = useState('import');
   const [provider, setProvider] = useState('jap');
-
-  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [apiKey, setApiKey] = useState('');
   const [apiUrl, setApiUrl] = useState(providers[0].url);
   const [fetchedServices, setFetchedServices] = useState([]);
@@ -42,15 +39,30 @@ export default function AdminApiImport() {
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('info');
 
+  // Markup settings
+  const [markupPercent, setMarkupPercent] = useState(0);
+
   // Our API tab
   const [apiKeys, setApiKeys] = useState([]);
   const [newLabel, setNewLabel] = useState('');
   const [genKey, setGenKey] = useState('');
   const [savingKey, setSavingKey] = useState(false);
 
+  useEffect(() => { loadMarkup(); }, []);
   useEffect(() => {
     if (tab === 'ourapi') loadApiKeys();
   }, [tab]);
+
+  const loadMarkup = async () => {
+    const { data } = await supabase.from('settings').select('value').eq('key', 'api_markup_percent').single();
+    if (data?.value) setMarkupPercent(parseFloat(data.value) || 0);
+  };
+
+  // Apply markup to a price
+  const applyMarkup = (price) => {
+    const p = parseFloat(price) || 0;
+    return markupPercent > 0 ? p * (1 + markupPercent / 100) : p;
+  };
 
   const loadApiKeys = async () => {
     const { data } = await supabase
@@ -71,7 +83,10 @@ export default function AdminApiImport() {
       // Use our proxy to bypass CORS
       const res = await fetch(PROXY, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
+        },
         body: JSON.stringify({
           url: apiUrl,
           key: apiKey,
@@ -173,8 +188,7 @@ export default function AdminApiImport() {
   };
 
   const deleteApiKey = async (id) => {
-    const ok = await confirm({ title:'Delete API Key?', message:'This API key will be permanently deleted.', confirmText:'Delete', confirmColor:'danger', icon:'🔑' });
-    if (!ok) return;
+    if (!window.confirm('Delete this API key?')) return;
     await supabase.from('api_keys').delete().eq('id', id);
     loadApiKeys();
   };
@@ -190,11 +204,6 @@ export default function AdminApiImport() {
 
   return (
     <div>
-      <ConfirmModal
-        {...confirmState}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
-      />
       <div className="atbs" style={{ marginBottom: '16px' }}>
         <button className={`atb ${tab === 'import' ? 'on' : ''}`} onClick={() => setTab('import')}>
           Import Services
