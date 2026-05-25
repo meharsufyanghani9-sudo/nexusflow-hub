@@ -15,7 +15,6 @@ const platformColors = {
   snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff'
 };
 
-// ─── Auto-place order on provider API ───────────────────────────────────────
 async function autoPlaceOnProvider(service, link, quantity, orderRef) {
   if (!service.provider_api_url || !service.provider_api_key || !service.provider_service_id) {
     return { success: false, reason: 'no_provider_config' };
@@ -36,20 +35,44 @@ async function autoPlaceOnProvider(service, link, quantity, orderRef) {
         quantity,
       }),
     });
-    if (!res.ok) {
-      return { success: false, reason: `HTTP ${res.status}` };
-    }
+    if (!res.ok) return { success: false, reason: `HTTP ${res.status}` };
     const providerData = await res.json();
     if (providerData && providerData.order) {
       return { success: true, vendorOrderId: String(providerData.order) };
     } else if (providerData && providerData.error) {
       return { success: false, reason: providerData.error };
-    } else {
-      return { success: false, reason: 'unknown_response' };
     }
+    return { success: false, reason: 'unknown_response' };
   } catch (e) {
     return { success: false, reason: e.message };
   }
+}
+
+// ─── Fetch ALL services from Supabase (bypasses 1000 row limit) ─────────────
+async function fetchAllServices() {
+  const PAGE_SIZE = 1000;
+  let allServices = [];
+  let from = 0;
+  let keepFetching = true;
+
+  while (keepFetching) {
+    const { data, error } = await supabase
+      .from('services')
+      .select('*')
+      .eq('is_active', true)
+      .order('is_featured', { ascending: false })
+      .order('created_at', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) { console.error('Services fetch error:', error.message); break; }
+    if (!data || data.length === 0) break;
+
+    allServices = [...allServices, ...data];
+    if (data.length < PAGE_SIZE) keepFetching = false;
+    else from += PAGE_SIZE;
+  }
+
+  return allServices;
 }
 
 export default function Marketplace({ user, onNav }) {
@@ -70,12 +93,8 @@ export default function Marketplace({ user, onNav }) {
 
   const loadServices = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('services').select('*')
-      .eq('is_active', true)
-      .order('is_featured', { ascending: false })
-      .order('created_at', { ascending: false });
-    if (data) setServices(data);
+    const all = await fetchAllServices();
+    setServices(all);
     setLoading(false);
   };
 
@@ -104,7 +123,6 @@ export default function Marketplace({ user, onNav }) {
     const totalCost = parseFloat(cost);
     if (totalCost <= 0) { setOrderError('Invalid cost calculated'); return; }
 
-    // Re-fetch fresh balance to prevent race condition
     const { data: freshUser } = await supabase.from('users').select('balance').eq('id', user.id).single();
     const currentBalance = parseFloat(freshUser?.balance || 0);
     if (totalCost > currentBalance) {
@@ -115,7 +133,6 @@ export default function Marketplace({ user, onNav }) {
     setOrdering(true);
     const orderRef = 'NF-' + Date.now();
 
-    // ─── 1. Insert the order ───────────────────────────────────────────────
     const { error: orderErr } = await supabase.from('orders').insert({
       order_ref: orderRef,
       user_id: user.id,
@@ -131,70 +148,49 @@ export default function Marketplace({ user, onNav }) {
     });
 
     if (orderErr) {
-      // Handle the has_refill column error gracefully
-      if (orderErr.message && orderErr.message.includes('has_refill')) {
-        // Try without the problematic field (it's not being sent anyway, but just in case)
-        setOrderError('Order system error. Please contact support. Error: ' + orderErr.message);
-      } else {
-        setOrderError('Order failed: ' + orderErr.message);
-      }
+      setOrderError('Order failed: ' + orderErr.message);
       setOrdering(false);
       return;
     }
 
-    // ─── 2. Deduct balance ────────────────────────────────────────────────
-    await supabase.from('users')
-      .update({ balance: currentBalance - totalCost })
-      .eq('id', user.id);
-
-    // ─── 3. Log transaction ────────────────────────────────────────────────
+    await supabase.from('users').update({ balance: currentBalance - totalCost }).eq('id', user.id);
     await supabase.from('transactions').insert({
-      user_id: user.id,
-      type: 'order',
-      amount: -totalCost,
-      description: `Order: ${selected.name}`,
-      ref_id: orderRef,
+      user_id: user.id, type: 'order', amount: -totalCost,
+      description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // ─── 4. Auto-place on provider API ────────────────────────────────────
     if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
       const result = await autoPlaceOnProvider(selected, link.trim(), q, orderRef);
       if (result.success) {
-        // Successfully placed → mark in_progress with vendor order ID
         await supabase.from('orders').update({
           vendor_order_id: result.vendorOrderId,
           status: 'in_progress',
           auto_place_attempts: 1,
         }).eq('order_ref', orderRef);
       } else {
-        // Failed → keep pending, record the error, admin can retry
         await supabase.from('orders').update({
           provider_note: `Auto-placement failed: ${result.reason}`,
           auto_place_attempts: 1,
         }).eq('order_ref', orderRef);
       }
     }
-    // If no provider config → stays pending for manual admin processing
 
     setOrdering(false);
     setOrdered(true);
-    // Update local user balance display
     user.balance = currentBalance - totalCost;
-    setTimeout(() => {
-      setSelected(null);
-      setOrdered(false);
-      setLink('');
-      setQty('');
-    }, 2500);
+    setTimeout(() => { setSelected(null); setOrdered(false); setLink(''); setQty(''); }, 2500);
   };
 
   const ic = (p) => platformIcons[p] || '⚙️';
   const cl = (p) => platformColors[p] || '#7b2fff';
 
+  // ─── Service Card — matches Screenshot 1 style (full width on mobile) ────
   const ServiceCard = ({ s }) => (
     <div
       className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
       onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
+
+      {/* FEATURED badge */}
       {s.is_featured && (
         <div style={{
           position: 'absolute', top: '-1px', right: '10px',
@@ -203,7 +199,9 @@ export default function Marketplace({ user, onNav }) {
           borderRadius: '0 0 6px 6px', letterSpacing: '1px', fontFamily: 'var(--fd)'
         }}>⭐ FEATURED</div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+
+      {/* Platform badge top-right */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
         <span style={{ fontSize: '22px' }}>{ic(s.platform)}</span>
         <span style={{
           fontSize: '9px', padding: '2px 7px', borderRadius: '10px', fontWeight: 700,
@@ -211,21 +209,35 @@ export default function Marketplace({ user, onNav }) {
           border: `1px solid ${cl(s.platform)}30`, textTransform: 'uppercase', letterSpacing: '1px'
         }}>{s.platform}</span>
       </div>
-      <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px', color: 'var(--text)' }}>{s.name}</div>
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px', flex: 1, lineHeight: 1.5 }}>{s.description}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+
+      {/* Service name */}
+      <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px', color: 'var(--text)', lineHeight: 1.4 }}>
+        {s.name}
+      </div>
+
+      {/* Description */}
+      <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px', lineHeight: 1.5 }}>
+        {s.description}
+      </div>
+
+      {/* Price + Min/Max row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '12px' }}>
         <div>
-          <div style={{ fontFamily: 'var(--fm)', fontSize: '15px', fontWeight: 700, color: 'var(--gold)' }}>
+          <div style={{ fontFamily: 'var(--fm)', fontSize: '18px', fontWeight: 700, color: 'var(--gold)' }}>
             {format(parseFloat(s.price_per_1k))}
           </div>
           <div style={{ fontSize: '9px', color: 'var(--text3)' }}>per 1,000</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Min: {(s.min_qty || 0).toLocaleString()}</div>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Max: {(s.max_qty || 0).toLocaleString()}</div>
+          <div style={{ fontSize: '10px', color: 'var(--text3)' }}>Min: {(s.min_qty || 0).toLocaleString()}</div>
+          <div style={{ fontSize: '10px', color: 'var(--text3)' }}>Max: {(s.max_qty || 0).toLocaleString()}</div>
         </div>
       </div>
-      <button className="btn bp bsm bw" style={{ marginTop: '12px' }}>Order Now →</button>
+
+      {/* Order Now button — full width like Screenshot 1 */}
+      <button className="btn bp bsm bw" style={{ marginTop: 'auto' }}>
+        ORDER NOW →
+      </button>
     </div>
   );
 
@@ -239,18 +251,24 @@ export default function Marketplace({ user, onNav }) {
               — Handpicked by admin
             </span>
           </div>
-          <div className="mkt-grid" style={{ marginBottom: '24px' }}>
+          {/* Featured: single column on mobile, 2 col on tablet+ */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gap: '14px',
+            marginBottom: '24px'
+          }}>
             {featuredServices.map(s => <ServiceCard key={s.id} s={s} />)}
           </div>
         </>
       )}
 
-      {/* ─── ALL SERVICES ─── */}
+      {/* ─── ALL SERVICES header ─── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
         <div className="st" style={{ margin: 0 }}>🛒 All Services</div>
-        {otherServices.length > 0 && (
-          <span style={{ fontSize: '9px', color: 'var(--text3)' }}>{otherServices.length} available</span>
-        )}
+        <span style={{ fontSize: '10px', color: 'var(--text3)' }}>
+          {loading ? 'Loading...' : `${services.length} available`}
+        </span>
         <button
           className="btn bgh bsm"
           style={{ marginLeft: 'auto' }}
@@ -259,8 +277,10 @@ export default function Marketplace({ user, onNav }) {
         </button>
       </div>
 
+      {/* ─── ALL SERVICES list ─── */}
       {showAll && (
         <>
+          {/* Search + filter */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
             <input className="srch-inp" style={{ flex: 1, minWidth: '140px' }}
               placeholder="🔍 Search services..."
@@ -276,18 +296,24 @@ export default function Marketplace({ user, onNav }) {
 
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>
-              <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>Loading services...
+              <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>
+              Loading all {services.length > 0 ? services.length + '+' : ''} services...
             </div>
           ) : filteredOthers.length === 0 ? (
             <div className="empty">
               <span className="empty-ic">🔍</span>
               <div className="empty-tx">{otherServices.length === 0 ? 'No more services' : 'No services found'}</div>
-              <div className="empty-sb">Try different search or filter</div>
+              <div className="empty-sb">Try different search or platform filter</div>
             </div>
           ) : (
-            <div className="mkt-grid">
-              {filteredOthers.map(s => <ServiceCard key={s.id} s={s} />)}
-            </div>
+            <>
+              <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '10px' }}>
+                Showing {filteredOthers.length} services
+              </div>
+              <div className="mkt-grid">
+                {filteredOthers.map(s => <ServiceCard key={s.id} s={s} />)}
+              </div>
+            </>
           )}
         </>
       )}
@@ -306,15 +332,22 @@ export default function Marketplace({ user, onNav }) {
           <div className="mbox" onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
               <span style={{ fontSize: '28px' }}>{ic(selected.platform)}</span>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text)' }}>{selected.name}</div>
-                <div style={{ fontSize: '10px', color: cl(selected.platform), textTransform: 'uppercase', letterSpacing: '1px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)', lineHeight: 1.3 }}>{selected.name}</div>
+                <div style={{ fontSize: '10px', color: cl(selected.platform), textTransform: 'uppercase', letterSpacing: '1px', marginTop: '2px' }}>
                   {selected.platform}
                 </div>
               </div>
               <button onClick={() => { if (!ordering) setSelected(null); }}
-                style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '22px' }}>×</button>
+                style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '22px', flexShrink: 0 }}>×</button>
             </div>
+
+            {/* Service description in modal */}
+            {selected.description && (
+              <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '14px', lineHeight: 1.6, padding: '8px 10px', background: 'rgba(0,0,0,.2)', borderRadius: '6px' }}>
+                {selected.description}
+              </div>
+            )}
 
             {ordered ? (
               <div style={{ textAlign: 'center', padding: '30px 0' }}>
@@ -334,14 +367,22 @@ export default function Marketplace({ user, onNav }) {
                     onChange={e => setQty(e.target.value)}
                     min={selected.min_qty} max={selected.max_qty} />
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '10px 13px', borderRadius: '8px', background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)' }}>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  marginBottom: '14px', padding: '10px 13px', borderRadius: '8px',
+                  background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)'
+                }}>
                   <span style={{ fontSize: '11px', color: 'var(--text2)' }}>Total Cost</span>
                   <span style={{ fontFamily: 'var(--fm)', fontSize: '18px', fontWeight: 700, color: 'var(--gold)' }}>
                     {format(parseFloat(cost))}
                   </span>
                 </div>
                 {orderError && (
-                  <div style={{ background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)', borderRadius: '7px', padding: '10px', color: '#ff6b6b', fontSize: '12px', marginBottom: '12px' }}>
+                  <div style={{
+                    background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)',
+                    borderRadius: '7px', padding: '10px', color: '#ff6b6b',
+                    fontSize: '12px', marginBottom: '12px'
+                  }}>
                     {orderError}
                   </div>
                 )}
