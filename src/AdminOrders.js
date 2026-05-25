@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
+const PROXY = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
 
 export default function AdminOrders() {
@@ -11,8 +11,7 @@ export default function AdminOrders() {
   const [search, setSearch] = useState('');
   const [msg, setMsg] = useState('');
   const [updating, setUpdating] = useState(null);
-
-  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
+  const [retrying, setRetrying] = useState(null);
   const [page, setPage] = useState(1);
   const PER_PAGE = 30;
 
@@ -20,23 +19,17 @@ export default function AdminOrders() {
 
   const loadOrders = async () => {
     setLoading(true);
-    setMsg('');
     const { data, error } = await supabase
       .from('orders')
-      .select('*, user:users!orders_user_id_fkey(full_name, email)')
+      .select('*, users(full_name, email)')
       .order('created_at', { ascending: false });
-    if (error) {
-      setMsg('❌ Error loading orders: ' + error.message);
-      console.error('Orders error:', error);
-    }
     if (data) setOrders(data);
-    else setOrders([]);
+    if (error) console.error('AdminOrders load error:', error.message);
     setLoading(false);
   };
 
   const updateStatus = async (orderId, newStatus) => {
     setUpdating(orderId);
-    // FIX: removed updated_at — that column does not exist in the orders table
     const { error } = await supabase
       .from('orders')
       .update({ status: newStatus })
@@ -52,11 +45,10 @@ export default function AdminOrders() {
   };
 
   const refundOrder = async (order) => {
-    const ok = await confirm({ title:'Refund & Cancel?', message:`Refund $${parseFloat(order.cost||0).toFixed(2)} and cancel this order?`, confirmText:'Yes, Refund', confirmColor:'danger', icon:'💸' });
-    if (!ok) return;
+    if (!window.confirm(`Refund $${parseFloat(order.cost || 0).toFixed(2)} and cancel order?`)) return;
     setUpdating(order.id);
     const { data: profile } = await supabase
-      .from('users').select('balance').eq('id', order.user_id).maybeSingle();
+      .from('users').select('balance').eq('id', order.user_id).single();
     if (profile) {
       const newBal = parseFloat(profile.balance || 0) + parseFloat(order.cost || 0);
       await supabase.from('users').update({ balance: newBal }).eq('id', order.user_id);
@@ -75,14 +67,125 @@ export default function AdminOrders() {
     setUpdating(null);
   };
 
+  // ─── Admin: Force retry auto-placement on provider ────────────────────────
+  const forceRetryProvider = async (order) => {
+    if (retrying) return;
+    setRetrying(order.id);
+
+    const { data: service } = await supabase
+      .from('services')
+      .select('provider_api_url, provider_api_key, provider_service_id')
+      .eq('id', order.service_id)
+      .single();
+
+    if (!service || !service.provider_api_url) {
+      setMsg('❌ Service has no provider configured.');
+      setRetrying(null);
+      setTimeout(() => setMsg(''), 4000);
+      return;
+    }
+
+    try {
+      const res = await fetch(PROXY, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
+        },
+        body: JSON.stringify({
+          url: service.provider_api_url,
+          key: service.provider_api_key,
+          action: 'add',
+          service: service.provider_service_id,
+          link: order.link,
+          quantity: order.quantity,
+        }),
+      });
+      const providerData = await res.json();
+      if (providerData && providerData.order) {
+        await supabase.from('orders').update({
+          vendor_order_id: String(providerData.order),
+          status: 'in_progress',
+          provider_note: null,
+        }).eq('id', order.id);
+        setMsg(`✅ Order NF-${order.order_ref} sent to provider! Vendor ID: ${providerData.order}`);
+      } else {
+        const errMsg = providerData?.error || JSON.stringify(providerData);
+        await supabase.from('orders').update({
+          provider_note: `Admin retry failed: ${errMsg}`,
+        }).eq('id', order.id);
+        setMsg('❌ Provider rejected: ' + errMsg);
+      }
+    } catch (e) {
+      setMsg('❌ Connection error: ' + e.message);
+    }
+
+    setRetrying(null);
+    loadOrders();
+    setTimeout(() => setMsg(''), 6000);
+  };
+
+  // ─── Check status from provider ──────────────────────────────────────────
+  const checkProviderStatus = async (order) => {
+    if (!order.vendor_order_id) {
+      setMsg('❌ No vendor order ID found.');
+      setTimeout(() => setMsg(''), 3000);
+      return;
+    }
+
+    const { data: service } = await supabase
+      .from('services')
+      .select('provider_api_url, provider_api_key')
+      .eq('id', order.service_id)
+      .single();
+
+    if (!service) { setMsg('❌ Service not found.'); return; }
+
+    try {
+      const res = await fetch(PROXY, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
+        },
+        body: JSON.stringify({
+          url: service.provider_api_url,
+          key: service.provider_api_key,
+          action: 'status',
+          order: order.vendor_order_id,
+        }),
+      });
+      const data = await res.json();
+      if (data.status) {
+        // Map provider status to our status
+        let newStatus = order.status;
+        const pStatus = (data.status || '').toLowerCase();
+        if (pStatus === 'completed') newStatus = 'completed';
+        else if (pStatus === 'in progress' || pStatus === 'processing') newStatus = 'in_progress';
+        else if (pStatus === 'cancelled' || pStatus === 'canceled') newStatus = 'cancelled';
+
+        if (newStatus !== order.status) {
+          await supabase.from('orders').update({ status: newStatus }).eq('id', order.id);
+        }
+        setMsg(`📊 Provider status: ${data.status}${data.remains ? ' | Remaining: ' + data.remains : ''}${data.start_count ? ' | Start: ' + data.start_count : ''}`);
+      } else {
+        setMsg('⚠️ Provider response: ' + JSON.stringify(data));
+      }
+    } catch (e) {
+      setMsg('❌ Error checking status: ' + e.message);
+    }
+    loadOrders();
+    setTimeout(() => setMsg(''), 8000);
+  };
+
   const filtered = orders.filter(o => {
     const matchStatus = filter === 'all' || o.status === filter;
     const matchSearch = !search ||
       (o.order_ref || '').toLowerCase().includes(search.toLowerCase()) ||
       (o.service_name || '').toLowerCase().includes(search.toLowerCase()) ||
       (o.link || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.user?.email || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.user?.full_name || '').toLowerCase().includes(search.toLowerCase());
+      (o.users?.email || '').toLowerCase().includes(search.toLowerCase()) ||
+      (o.users?.full_name || '').toLowerCase().includes(search.toLowerCase());
     return matchStatus && matchSearch;
   });
 
@@ -95,32 +198,30 @@ export default function AdminOrders() {
     inProgress: orders.filter(o => o.status === 'in_progress').length,
     completed: orders.filter(o => o.status === 'completed').length,
     revenue: orders.reduce((a, b) => a + parseFloat(b.cost || 0), 0),
+    // How many pending have no vendor ID (stuck)
+    stuck: orders.filter(o => o.status === 'pending' && o.provider_note).length,
   };
 
   return (
     <div>
-      <ConfirmModal
-        {...confirmState}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
-      />
       {msg && (
         <div style={{
-          background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : 'rgba(255,50,80,.08)',
+          background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : msg.startsWith('⚠️') || msg.startsWith('📊') ? 'rgba(255,184,0,.08)' : 'rgba(255,50,80,.08)',
           border: `1px solid ${msg.startsWith('✅') ? 'rgba(0,255,136,.2)' : 'rgba(255,50,80,.2)'}`,
           borderRadius: '8px', padding: '12px', textAlign: 'center',
-          color: msg.startsWith('✅') ? 'var(--green)' : '#ff6b6b',
+          color: msg.startsWith('✅') ? 'var(--green)' : msg.startsWith('⚠️') || msg.startsWith('📊') ? 'var(--gold)' : '#ff6b6b',
           fontWeight: 700, marginBottom: '16px', fontSize: '13px'
         }}>{msg}</div>
       )}
 
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '📦', lb: 'Total Orders', vl: stats.total,                       cl: 'cn'  },
-          { ic: '⏳', lb: 'Pending',      vl: stats.pending,                      cl: 'cw'  },
-          { ic: '⚡', lb: 'In Progress',  vl: stats.inProgress,                   cl: 'cn'  },
-          { ic: '✅', lb: 'Completed',    vl: stats.completed,                     cl: 'cg'  },
-          { ic: '💰', lb: 'Revenue',      vl: `$${stats.revenue.toFixed(2)}`,      cl: 'cgo' },
+          { ic: '📦', lb: 'Total Orders',  vl: stats.total,                      cl: 'cn'  },
+          { ic: '⏳', lb: 'Pending',        vl: stats.pending,                    cl: 'cw'  },
+          { ic: '⚡', lb: 'In Progress',    vl: stats.inProgress,                 cl: 'cn'  },
+          { ic: '✅', lb: 'Completed',      vl: stats.completed,                  cl: 'cg'  },
+          { ic: '💰', lb: 'Revenue',        vl: `$${stats.revenue.toFixed(2)}`,   cl: 'cgo' },
+          { ic: '🔴', lb: 'Stuck Orders',   vl: stats.stuck,                      cl: stats.stuck > 0 ? 'cred' : 'cg' },
         ].map((s, i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -129,6 +230,17 @@ export default function AdminOrders() {
           </div>
         ))}
       </div>
+
+      {/* Show warning if stuck orders exist */}
+      {stats.stuck > 0 && (
+        <div style={{
+          background: 'rgba(255,184,0,.08)', border: '1px solid rgba(255,184,0,.25)',
+          borderRadius: '8px', padding: '12px', marginBottom: '16px',
+          fontSize: '12px', color: 'var(--gold)', lineHeight: 1.7
+        }}>
+          ⚠️ <strong>{stats.stuck} pending orders</strong> failed to auto-place on provider. Filter by "Pending" and click <strong>🔄 Send</strong> to retry them manually.
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
         <input className="srch-inp" style={{ flex: 1, minWidth: '160px' }}
@@ -178,14 +290,22 @@ export default function AdminOrders() {
                     <td colSpan="9" style={{ textAlign: 'center', padding: '32px', color: 'var(--text3)' }}>No orders found</td>
                   </tr>
                 ) : paginated.map(o => (
-                  <tr key={o.id}>
+                  <tr key={o.id} style={{ background: o.provider_note && o.status === 'pending' ? 'rgba(255,184,0,.04)' : 'transparent' }}>
                     <td style={{ fontFamily: 'var(--fm)', color: 'var(--neon)', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.order_ref || o.id}
-                      {o.provider_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.provider_order_id}</div>}
+                      {o.vendor_order_id && (
+                        <div style={{ fontSize: '9px', color: 'var(--text3)' }}>V: {o.vendor_order_id}</div>
+                      )}
+                      {o.provider_note && o.status === 'pending' && (
+                        <div style={{ fontSize: '9px', color: '#ff9800', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                          title={o.provider_note}>
+                          ⚠️ Failed
+                        </div>
+                      )}
                     </td>
                     <td style={{ fontSize: '11px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.user?.full_name || '—'}</div>
-                      <div style={{ color: 'var(--text3)', fontSize: '9px' }}>{(o.user?.email || '').slice(0, 18)}</div>
+                      <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.users?.full_name || '—'}</div>
+                      <div style={{ color: 'var(--text3)', fontSize: '9px' }}>{(o.users?.email || '').slice(0, 18)}</div>
                     </td>
                     <td style={{ fontWeight: 600, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>
                       {o.service_name}
@@ -221,6 +341,32 @@ export default function AdminOrders() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                        {/* Send to provider (for stuck pending orders) */}
+                        {o.status === 'pending' && !o.vendor_order_id && (
+                          <button
+                            onClick={() => forceRetryProvider(o)}
+                            disabled={retrying === o.id || updating === o.id}
+                            style={{
+                              padding: '4px 8px', borderRadius: '6px', cursor: 'pointer',
+                              border: '1px solid rgba(0,212,255,.3)', background: 'rgba(0,212,255,.1)',
+                              color: 'var(--neon)', fontSize: '10px', whiteSpace: 'nowrap'
+                            }}>
+                            {retrying === o.id ? '⏳' : '🔄 Send'}
+                          </button>
+                        )}
+                        {/* Check status from provider */}
+                        {o.vendor_order_id && o.status === 'in_progress' && (
+                          <button
+                            onClick={() => checkProviderStatus(o)}
+                            disabled={updating === o.id}
+                            style={{
+                              padding: '4px 8px', borderRadius: '6px', cursor: 'pointer',
+                              border: '1px solid rgba(123,47,255,.3)', background: 'rgba(123,47,255,.1)',
+                              color: '#7b2fff', fontSize: '10px', whiteSpace: 'nowrap'
+                            }}>
+                            📊 Status
+                          </button>
+                        )}
                         {o.status !== 'cancelled' && o.status !== 'completed' && (
                           <button onClick={() => refundOrder(o)} disabled={updating === o.id}
                             style={{
@@ -231,7 +377,7 @@ export default function AdminOrders() {
                             💸 Refund
                           </button>
                         )}
-                        {o.refill_requested && o.status !== 'cancelled' && (
+                        {o.refill_requested && (
                           <span style={{ fontSize: '9px', color: 'var(--gold)', whiteSpace: 'nowrap', padding: '4px' }}>
                             🔁 Refill req.
                           </span>
