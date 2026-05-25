@@ -3,461 +3,341 @@ import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
 const platformIcons = {
-  instagram: '📸', tiktok: '🎵', youtube: '▶️', twitter: '🐦',
-  facebook: '👤', telegram: '✈️', snapchat: '👻', linkedin: '💼',
-  spotify: '🎵', discord: '🎮', twitch: '🎮', custom: '⚙️'
+  instagram:'📸',tiktok:'🎵',youtube:'▶️',twitter:'🐦',
+  facebook:'👤',telegram:'✈️',snapchat:'👻',linkedin:'💼',
+  spotify:'🎧',discord:'🎮',twitch:'📺',custom:'⚙️'
 };
 const platformColors = {
-  instagram: '#E1306C', tiktok: '#00d4ff', youtube: '#FF0000',
-  twitter: '#1DA1F2', facebook: '#1877F2', telegram: '#0088cc',
-  snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff'
+  instagram:'#E1306C',tiktok:'#00d4ff',youtube:'#FF0000',
+  twitter:'#1DA1F2',facebook:'#1877F2',telegram:'#0088cc',
+  snapchat:'#FFFC00',linkedin:'#0077B5',custom:'#7b2fff'
+};
+
+// ── Quality filters: properly detect refill vs no-refill ──────────────────
+const qualityFilters = [
+  { id:'', label:'All Types' },
+  { id:'guaranteed', label:'Guaranteed' },
+  { id:'non_drop', label:'Non-Drop' },
+  { id:'budget', label:'Budget' },
+  { id:'with_refill', label:'With Refill' },
+  { id:'no_refill', label:'No Refill' },
+  { id:'fast', label:'Fast Delivery' },
+];
+
+// Detect if a service has refill from its name/description
+const hasRefillInText = (s) => {
+  const text = ((s.name || '') + ' ' + (s.description || '')).toLowerCase();
+  const hasRefill = text.includes('refill') && !text.includes('no refill') && !text.includes('no-refill') && !text.includes('non-refill') && !text.includes('🚫') && !text.includes('no refill 🔴');
+  return hasRefill || s.has_refill === true;
+};
+
+const hasNoRefillInText = (s) => {
+  const text = ((s.name || '') + ' ' + (s.description || '')).toLowerCase();
+  return text.includes('no refill') || text.includes('no-refill') || (!hasRefillInText(s));
 };
 
 export default function Marketplace({ user, onNav }) {
   const { format } = useCurrency();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeSection, setActiveSection] = useState('featured');
+  const [selectedPlatform, setSelectedPlatform] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [qualityFilter, setQualityFilter] = useState('');
   const [search, setSearch] = useState('');
-  const [platform, setPlatform] = useState('');
-  const [showAll, setShowAll] = useState(false);
   const [selected, setSelected] = useState(null);
   const [link, setLink] = useState('');
   const [qty, setQty] = useState('');
   const [ordering, setOrdering] = useState(false);
   const [ordered, setOrdered] = useState(false);
   const [orderError, setOrderError] = useState('');
-  // ── NEW: show what happened with auto-placement ──
-  const [providerStatus, setProviderStatus] = useState(''); // 'sending' | 'sent' | 'failed' | 'skipped'
 
   useEffect(() => { loadServices(); }, []);
 
   const loadServices = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('services').select('*')
-      .eq('is_active', true)
-      .order('is_featured', { ascending: false })
-      .order('created_at', { ascending: false });
-    if (data) setServices(data);
+    let allData = [];
+    let from = 0;
+    const PAGE = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('services').select('*')
+        .eq('is_active', true)
+        .order('is_featured', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error || !data || data.length === 0) break;
+      allData = [...allData, ...data];
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    setServices(allData);
     setLoading(false);
   };
 
   const featuredServices = services.filter(s => s.is_featured);
-  const otherServices = services.filter(s => !s.is_featured);
-  const availablePlatforms = [...new Set(otherServices.map(s => s.platform))].filter(Boolean);
+  const allServices = services.filter(s => !s.is_featured);
+  const availablePlatforms = [...new Set(allServices.map(s => s.platform))].filter(Boolean);
+  const platformServices = selectedPlatform ? allServices.filter(s => s.platform === selectedPlatform) : allServices;
+  const availableCategories = [...new Set(platformServices.map(s => s.category).filter(Boolean))];
 
-  const filteredOthers = otherServices.filter(s => {
-    const matchPl = !platform || s.platform === platform;
-    const matchQ = !search || s.name.toLowerCase().includes(search.toLowerCase());
-    return matchPl && matchQ;
+  const filteredServices = platformServices.filter(s => {
+    if (selectedCategory && s.category !== selectedCategory) return false;
+    if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (qualityFilter) {
+      const n = ((s.name||'') + ' ' + (s.description||'')).toLowerCase();
+      if (qualityFilter === 'guaranteed' && !n.includes('guarant')) return false;
+      if (qualityFilter === 'non_drop' && !n.includes('non-drop') && !n.includes('non drop') && !n.includes('nondrop')) return false;
+      if (qualityFilter === 'with_refill' && !hasRefillInText(s)) return false;
+      if (qualityFilter === 'no_refill' && !hasNoRefillInText(s)) return false;
+      if (qualityFilter === 'fast' && !n.includes('fast') && !n.includes('instant') && !n.includes('speed')) return false;
+      if (qualityFilter === 'budget') {
+        const prices = allServices.map(x => parseFloat(x.price_per_1k || 0)).sort((a, b) => a - b);
+        const threshold = prices[Math.floor(prices.length * 0.35)] || 999;
+        if (parseFloat(s.price_per_1k || 0) > threshold) return false;
+      }
+    }
+    return true;
   });
 
   const cost = selected && qty
     ? (parseFloat(qty) / 1000 * parseFloat(selected.price_per_1k)).toFixed(4)
     : '0.00';
 
-  // ── FIX: Determine the correct proxy URL ───────────────────────────────────
-  // Use our own Vercel API route (/api/proxy) NOT the Supabase Edge Function.
-  // This works on nexusflow-hub.shop because Vercel serves api/proxy.js.
-  const getProxyUrl = () => {
-    // Always use our own domain's /api/proxy endpoint
-    return `${window.location.origin}/api/proxy`;
-  };
-
   const placeOrder = async () => {
     setOrderError('');
-    setProviderStatus('');
-
     if (!link) { setOrderError('Enter your link'); return; }
     const q = parseInt(qty);
     if (!q || q < selected.min_qty || q > selected.max_qty) {
-      setOrderError(`Quantity must be ${selected.min_qty} – ${selected.max_qty}`);
-      return;
+      setOrderError(`Quantity must be ${selected.min_qty} – ${selected.max_qty}`); return;
     }
     const totalCost = parseFloat(cost);
     if (totalCost > user.balance) { setOrderError('Insufficient balance'); return; }
-
     setOrdering(true);
     const orderRef = 'NF-' + Date.now();
-
-    // 1. Save order to database first
     const { error: orderErr } = await supabase.from('orders').insert({
-      order_ref: orderRef,
-      user_id: user.id,
-      service_id: selected.id,
-      service_name: selected.name,
-      platform: selected.platform,
-      link, quantity: q, cost: totalCost,
-      status: 'pending', progress: 0,
+      order_ref: orderRef, user_id: user.id, service_id: selected.id,
+      service_name: selected.name, platform: selected.platform,
+      link, quantity: q, cost: totalCost, status: 'pending', progress: 0,
+      has_refill: hasRefillInText(selected), refill_days: selected.refill_days || 30,
     });
-
-    if (orderErr) {
-      setOrderError('Order failed: ' + orderErr.message);
-      setOrdering(false);
-      return;
-    }
-
-    // 2. Deduct balance
+    if (orderErr) { setOrderError('Order failed: ' + orderErr.message); setOrdering(false); return; }
     await supabase.from('users').update({ balance: user.balance - totalCost }).eq('id', user.id);
-
-    // 3. Save transaction record
     await supabase.from('transactions').insert({
       user_id: user.id, type: 'order', amount: -totalCost,
       description: `Order: ${selected.name}`, ref_id: orderRef,
     });
-
-    // ── FIX: AUTO-SEND TO PROVIDER API ─────────────────────────────────────
-    // Only attempt if the service has all 3 provider fields filled in by admin
-    const hasProvider = (
-      selected.provider_api_url &&
-      selected.provider_api_url.trim() !== '' &&
-      selected.provider_api_key &&
-      selected.provider_api_key.trim() !== '' &&
-      selected.provider_service_id &&
-      selected.provider_service_id.trim() !== ''
-    );
-
-    if (hasProvider) {
-      setProviderStatus('sending');
+    if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
       try {
-        // ── FIX: Use /api/proxy (our own Vercel function) NOT Supabase Edge ──
-        const proxyUrl = getProxyUrl();
-
-        const res = await fetch(proxyUrl, {
+        const res = await fetch('https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: selected.provider_api_url.trim(),
-            key: selected.provider_api_key.trim(),
-            action: 'add',
-            service: String(selected.provider_service_id).trim(),
-            link: link.trim(),
-            quantity: q,
-          }),
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X' },
+          body: JSON.stringify({ url: selected.provider_api_url, key: selected.provider_api_key, action: 'add', service: selected.provider_service_id, link, quantity: q }),
         });
-
-        if (!res.ok) {
-          throw new Error(`Proxy returned HTTP ${res.status}`);
-        }
-
-        const providerData = await res.json();
-
-        if (providerData && providerData.order) {
-          // ✅ Provider accepted the order
-          await supabase.from('orders').update({
-            vendor_order_id: String(providerData.order),
-            status: 'in_progress',
-            provider_note: null,
-          }).eq('order_ref', orderRef);
-          setProviderStatus('sent');
-
-        } else if (providerData && providerData.error) {
-          // Provider returned an error message
-          await supabase.from('orders').update({
-            provider_note: `Provider error: ${providerData.error}`,
-            status: 'pending',
-          }).eq('order_ref', orderRef);
-          setProviderStatus('failed');
-
-        } else if (providerData && providerData.raw) {
-          // Provider returned non-JSON (unusual)
-          await supabase.from('orders').update({
-            provider_note: `Unexpected response: ${String(providerData.raw).slice(0, 200)}`,
-            status: 'pending',
-          }).eq('order_ref', orderRef);
-          setProviderStatus('failed');
-
-        } else {
-          // No order ID and no error — ambiguous
-          await supabase.from('orders').update({
-            provider_note: `No order ID returned. Response: ${JSON.stringify(providerData).slice(0, 200)}`,
-            status: 'pending',
-          }).eq('order_ref', orderRef);
-          setProviderStatus('failed');
-        }
-
+        const pd = await res.json();
+        if (pd?.order) await supabase.from('orders').update({ vendor_order_id: String(pd.order), status: 'in_progress' }).eq('order_ref', orderRef);
+        else if (pd?.error) await supabase.from('orders').update({ provider_note: `Provider error: ${pd.error}` }).eq('order_ref', orderRef);
       } catch (e) {
-        // Network error or proxy error
-        await supabase.from('orders').update({
-          provider_note: `Auto-placement error: ${e.message}`,
-          status: 'pending',
-        }).eq('order_ref', orderRef);
-        setProviderStatus('failed');
+        await supabase.from('orders').update({ provider_note: `Auto-placement failed: ${e.message}` }).eq('order_ref', orderRef);
       }
-    } else {
-      // Service has no provider configured — manual fulfillment by admin
-      setProviderStatus('skipped');
     }
-
-    setOrdering(false);
-    setOrdered(true);
-    setTimeout(() => {
-      setSelected(null);
-      setOrdered(false);
-      setLink('');
-      setQty('');
-      setProviderStatus('');
-    }, 3000);
+    setOrdering(false); setOrdered(true);
+    setTimeout(() => { setSelected(null); setOrdered(false); setLink(''); setQty(''); }, 2500);
   };
 
-  const ic = (p) => platformIcons[p] || '⚙️';
-  const cl = (p) => platformColors[p] || '#7b2fff';
+  const ic = p => platformIcons[p] || '⚙️';
+  const cl = p => platformColors[p] || '#7b2fff';
 
-  const ServiceCard = ({ s }) => (
-    <div
-      className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
-      onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); setProviderStatus(''); }}>
-      {s.is_featured && (
-        <div style={{
-          position: 'absolute', top: '-1px', right: '10px',
-          background: 'linear-gradient(135deg,var(--gold2),var(--gold))',
-          color: '#000', fontSize: '8px', fontWeight: 800, padding: '3px 8px',
-          borderRadius: '0 0 6px 6px', letterSpacing: '1px', fontFamily: 'var(--fd)'
-        }}>⭐ FEATURED</div>
-      )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-        <span style={{ fontSize: '22px' }}>{ic(s.platform)}</span>
-        <span style={{
-          fontSize: '9px', padding: '2px 7px', borderRadius: '10px', fontWeight: 700,
-          background: `${cl(s.platform)}18`, color: cl(s.platform),
-          border: `1px solid ${cl(s.platform)}30`, textTransform: 'uppercase', letterSpacing: '1px'
-        }}>{s.platform}</span>
-      </div>
-      <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px', color: 'var(--text)' }}>{s.name}</div>
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px', flex: 1, lineHeight: 1.5 }}>{s.description}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--fm)', fontSize: '15px', fontWeight: 700, color: 'var(--gold)' }}>
-            {format(parseFloat(s.price_per_1k))}
+  const ServiceCard = ({ s, compact }) => {
+    const sHasRefill = hasRefillInText(s);
+    return (
+      <div
+        className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
+        onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
+        {s.is_featured && (
+          <div className="mkt-featured-badge">⭐ FEATURED</div>
+        )}
+        <div className="mkt-card-top">
+          <div className="mkt-platform-icon">{ic(s.platform)}</div>
+          <span className="mkt-platform-tag" style={{ color: cl(s.platform), background: `${cl(s.platform)}18`, border: `1px solid ${cl(s.platform)}30` }}>
+            {s.platform?.toUpperCase()}
+          </span>
+        </div>
+        <div className="mkt-card-name">{s.name}</div>
+        {s.category && <div className="mkt-card-cat">{s.category}</div>}
+        {!compact && s.description && <div className="mkt-card-desc">{s.description}</div>}
+        <div className="mkt-card-badges">
+          {sHasRefill
+            ? <span className="mkt-badge mkt-badge-refill">🔄 Refill</span>
+            : <span className="mkt-badge mkt-badge-norefill">⚡ No Refill</span>
+          }
+          {((s.name||'')+(s.description||'')).toLowerCase().includes('non-drop') && (
+            <span className="mkt-badge mkt-badge-nondrop">💎 Non-Drop</span>
+          )}
+          {((s.name||'')+(s.description||'')).toLowerCase().includes('guarant') && (
+            <span className="mkt-badge mkt-badge-guaranteed">✅ Guaranteed</span>
+          )}
+        </div>
+        <div className="mkt-card-footer">
+          <div>
+            <div className="mkt-card-price">{format(parseFloat(s.price_per_1k))}</div>
+            <div className="mkt-card-per">per 1,000</div>
           </div>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>per 1,000</div>
+          <div className="mkt-card-qty">
+            <div>Min: {(s.min_qty||0).toLocaleString()}</div>
+            <div>Max: {(s.max_qty||0).toLocaleString()}</div>
+          </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Min: {(s.min_qty || 0).toLocaleString()}</div>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Max: {(s.max_qty || 0).toLocaleString()}</div>
-        </div>
+        <button className="mkt-order-btn">Order Now →</button>
       </div>
-      {/* Show auto-API badge if configured */}
-      {s.provider_api_url && s.provider_api_key && s.provider_service_id && (
-        <div style={{
-          marginTop: '8px', fontSize: '9px', color: 'var(--green)',
-          background: 'rgba(0,255,136,.08)', border: '1px solid rgba(0,255,136,.15)',
-          borderRadius: '4px', padding: '2px 7px', display: 'inline-block'
-        }}>⚡ Auto-fulfillment</div>
-      )}
-      <button className="btn bp bsm bw" style={{ marginTop: '12px' }}>Order Now →</button>
-    </div>
-  );
+    );
+  };
 
   return (
-    <div>
-      {/* ─── FEATURED SERVICES ─── */}
-      {!loading && featuredServices.length > 0 && (
-        <>
-          <div className="st">⭐ Featured Services
-            <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, letterSpacing: '1px', marginLeft: '8px' }}>
-              — Handpicked by admin
-            </span>
-          </div>
-          <div className="mkt-grid" style={{ marginBottom: '24px' }}>
-            {featuredServices.map(s => <ServiceCard key={s.id} s={s} />)}
-          </div>
-        </>
-      )}
-
-      {/* ─── ALL SERVICES ─── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <div className="st" style={{ margin: 0 }}>🛒 All Services</div>
-        {otherServices.length > 0 && (
-          <span style={{ fontSize: '9px', color: 'var(--text3)' }}>{otherServices.length} available</span>
-        )}
-        <button
-          className="btn bgh bsm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setShowAll(!showAll)}>
-          {showAll ? '▲ Collapse' : '▼ Browse All'}
+    <div className="mkt-wrap">
+      {/* Section Tabs */}
+      <div className="mkt-tabs">
+        <button className={`mkt-tab ${activeSection==='featured'?'mkt-tab-active':''}`} onClick={() => setActiveSection('featured')}>
+          <span>⭐</span> Featured
+        </button>
+        <button className={`mkt-tab ${activeSection==='all'?'mkt-tab-active':''}`} onClick={() => setActiveSection('all')}>
+          <span>🛒</span> Live Services
+          <span className="mkt-tab-count">{allServices.length}</span>
         </button>
       </div>
 
-      {showAll && (
-        <>
-          {/* Search & Filter */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
-            <input
-              className="inp"
-              placeholder="🔍 Search services..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{ flex: 1, minWidth: '150px' }}
-            />
-            <select className="sel" value={platform} onChange={e => setPlatform(e.target.value)}
-              style={{ minWidth: '120px' }}>
-              <option value="">All Platforms</option>
-              {availablePlatforms.map(p => (
-                <option key={p} value={p}>{ic(p)} {p}</option>
-              ))}
-            </select>
+      {/* FEATURED */}
+      {activeSection === 'featured' && (
+        <div>
+          {loading ? (
+            <div className="mkt-loading"><div className="mkt-spinner" /><span>Loading services...</span></div>
+          ) : featuredServices.length === 0 ? (
+            <div className="empty"><span className="empty-ic">⭐</span><div className="empty-tx">No featured services yet</div></div>
+          ) : (
+            <div className="mkt-featured-grid">
+              {featuredServices.map(s => <ServiceCard key={s.id} s={s} compact={true} />)}
+            </div>
+          )}
+          <button className="mkt-browse-btn" onClick={() => setActiveSection('all')}>
+            Browse All {allServices.length} Services →
+          </button>
+        </div>
+      )}
+
+      {/* ALL SERVICES */}
+      {activeSection === 'all' && (
+        <div>
+          {/* Platform pills */}
+          <div className="mkt-filter-row">
+            <button className={`mkt-pill ${!selectedPlatform?'mkt-pill-active':''}`} onClick={() => { setSelectedPlatform(''); setSelectedCategory(''); }}>
+              🌐 All
+            </button>
+            {availablePlatforms.map(p => (
+              <button key={p} className={`mkt-pill ${selectedPlatform===p?'mkt-pill-active':''}`}
+                style={selectedPlatform===p ? { borderColor: cl(p), background: `${cl(p)}18`, color: cl(p) } : {}}
+                onClick={() => { setSelectedPlatform(p); setSelectedCategory(''); }}>
+                {ic(p)} {p}
+              </button>
+            ))}
+          </div>
+
+          {/* Categories */}
+          {selectedPlatform && availableCategories.length > 0 && (
+            <div>
+              <div className="mkt-filter-label">Category</div>
+              <div className="mkt-filter-row">
+                <button className={`mkt-pill mkt-pill-sm ${!selectedCategory?'mkt-pill-cat-active':''}`} onClick={() => setSelectedCategory('')}>All</button>
+                {availableCategories.map(cat => (
+                  <button key={cat} className={`mkt-pill mkt-pill-sm ${selectedCategory===cat?'mkt-pill-cat-active':''}`} onClick={() => setSelectedCategory(cat)}>{cat}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Quality filters */}
+          <div className="mkt-filter-row" style={{ marginTop: '6px' }}>
+            {qualityFilters.map(f => (
+              <button key={f.id} className={`mkt-pill mkt-pill-sm mkt-pill-quality ${qualityFilter===f.id?'mkt-pill-quality-active':''}`} onClick={() => setQualityFilter(f.id)}>
+                {f.id === 'with_refill' && '🔄 '}
+                {f.id === 'no_refill' && '⚡ '}
+                {f.id === 'guaranteed' && '✅ '}
+                {f.id === 'non_drop' && '💎 '}
+                {f.id === 'budget' && '💰 '}
+                {f.id === 'fast' && '⚡ '}
+                {f.id === '' && '🌐 '}
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Search */}
+          <div className="mkt-search-row">
+            <input className="mkt-search" placeholder="🔍 Search services..."
+              value={search} onChange={e => setSearch(e.target.value)} />
+            <div className="mkt-count">Showing <strong>{filteredServices.length}</strong> of {allServices.length}</div>
           </div>
 
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>Loading services...</div>
-          ) : filteredOthers.length === 0 ? (
-            <div className="empty">
-              <span className="empty-ic">🛒</span>
-              <div className="empty-tx">No services found</div>
-              <div className="empty-sb">Try a different search or platform filter</div>
-            </div>
+            <div className="mkt-loading"><div className="mkt-spinner" /><span>Loading services...</span></div>
+          ) : filteredServices.length === 0 ? (
+            <div className="empty"><span className="empty-ic">🔍</span><div className="empty-tx">No services found</div><div className="empty-sb">Try different filters</div></div>
           ) : (
             <div className="mkt-grid">
-              {filteredOthers.map(s => <ServiceCard key={s.id} s={s} />)}
+              {filteredServices.map(s => <ServiceCard key={s.id} s={s} />)}
             </div>
           )}
-        </>
+        </div>
       )}
 
-      {/* ─── ORDER MODAL ─── */}
+      {/* ORDER MODAL */}
       {selected && (
-        <div className="mlay" onClick={e => e.target.classList.contains('mlay') && !ordering && setSelected(null)}>
-          <div className="mbox">
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
-              <div className="mttl">{ic(selected.platform)} {selected.name}</div>
-              {!ordering && (
-                <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-              )}
+        <div className="mlay" onClick={() => setSelected(null)}>
+          <div className="mbox" onClick={e => e.stopPropagation()}>
+            <div className="mkt-modal-header">
+              <span style={{ fontSize: '32px' }}>{ic(selected.platform)}</span>
+              <div className="mkt-modal-info">
+                <div className="mkt-modal-name">{selected.name}</div>
+                <span className="mkt-platform-tag" style={{ color: cl(selected.platform), background: `${cl(selected.platform)}18`, border: `1px solid ${cl(selected.platform)}30` }}>
+                  {selected.platform?.toUpperCase()}
+                </span>
+              </div>
+              <button onClick={() => setSelected(null)} className="mkt-modal-close">×</button>
             </div>
 
+            {selected.description && (
+              <div className="mkt-modal-desc">{selected.description}</div>
+            )}
+
+            {hasRefillInText(selected) && (
+              <div className="mkt-refill-banner">
+                🔄 This service includes a {selected.refill_days || 30}-day refill guarantee
+              </div>
+            )}
+
             {ordered ? (
-              <div style={{ textAlign: 'center', padding: '28px' }}>
-                <div style={{ fontSize: '44px', marginBottom: '12px' }}>✅</div>
-                <div style={{ fontFamily: 'var(--fd)', fontSize: '13px', color: 'var(--green)', marginBottom: '6px', letterSpacing: '1px' }}>
-                  Order Placed!
-                </div>
-                {/* ── Show provider status to user ── */}
-                {providerStatus === 'sent' && (
-                  <div style={{ fontSize: '11px', color: 'var(--green)', marginTop: '6px' }}>
-                    ⚡ Auto-sent to provider. Processing started!
-                  </div>
-                )}
-                {providerStatus === 'failed' && (
-                  <div style={{ fontSize: '11px', color: 'var(--warn)', marginTop: '6px' }}>
-                    ⚠️ Auto-send failed. Admin will process manually.
-                  </div>
-                )}
-                {providerStatus === 'skipped' && (
-                  <div style={{ fontSize: '11px', color: 'var(--text2)', marginTop: '6px' }}>
-                    📋 Admin will fulfill your order shortly.
-                  </div>
-                )}
-                {providerStatus === 'sending' && (
-                  <div style={{ fontSize: '11px', color: 'var(--neon)', marginTop: '6px' }}>
-                    ⏳ Sending to provider...
-                  </div>
-                )}
+              <div className="mkt-success">
+                <div style={{ fontSize: '44px' }}>✅</div>
+                <div className="mkt-success-title">Order Placed!</div>
+                <div className="mkt-success-sub">Processing automatically...</div>
               </div>
             ) : (
               <>
-                {/* Service info */}
-                <div style={{
-                  padding: '10px 12px', borderRadius: '8px', marginBottom: '14px',
-                  background: `${cl(selected.platform)}0d`, border: `1px solid ${cl(selected.platform)}25`,
-                  fontSize: '11px', color: 'var(--text2)', lineHeight: 1.6,
-                }}>
-                  {selected.description}
-                </div>
-
-                {/* Price info */}
-                <div style={{ display: 'flex', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
-                    Rate: <span style={{ color: 'var(--gold)', fontFamily: 'var(--fm)', fontWeight: 700 }}>{format(parseFloat(selected.price_per_1k))}</span> / 1K
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
-                    Min: <span style={{ color: 'var(--neon)', fontFamily: 'var(--fm)' }}>{selected.min_qty?.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
-                    Max: <span style={{ color: 'var(--neon)', fontFamily: 'var(--fm)' }}>{selected.max_qty?.toLocaleString()}</span>
-                  </div>
-                </div>
-
                 <div className="fi">
-                  <label className="fl">Your Link / Username / Page URL</label>
-                  <input className="inp" placeholder="https://instagram.com/yourpage"
-                    value={link} onChange={e => setLink(e.target.value)} />
+                  <label className="fl">Your Link / Username</label>
+                  <input className="inp" value={link} onChange={e => setLink(e.target.value)} placeholder="https://..." />
                 </div>
-
                 <div className="fi">
-                  <label className="fl" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Quantity</span>
-                    <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
-                      {selected.min_qty?.toLocaleString()} – {selected.max_qty?.toLocaleString()}
-                    </span>
-                  </label>
-                  <input className="inp" type="number"
-                    placeholder={selected.min_qty}
-                    value={qty}
-                    onChange={e => setQty(e.target.value)}
-                    min={selected.min_qty}
-                    max={selected.max_qty}
-                  />
+                  <label className="fl">Quantity ({(selected.min_qty||0).toLocaleString()} – {(selected.max_qty||0).toLocaleString()})</label>
+                  <input className="inp" type="number" value={qty}
+                    onChange={e => setQty(e.target.value)} min={selected.min_qty} max={selected.max_qty} />
                 </div>
-
-                {/* Cost preview */}
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '12px 14px', borderRadius: '8px', marginBottom: '14px',
-                  background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.15)',
-                }}>
-                  <div>
-                    <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '2px' }}>Total Cost</div>
-                    <div style={{ fontFamily: 'var(--fm)', fontSize: '20px', fontWeight: 700, color: 'var(--gold)' }}>
-                      ${cost}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '2px' }}>Your Balance</div>
-                    <div style={{ fontFamily: 'var(--fm)', fontSize: '14px', fontWeight: 700, color: parseFloat(cost) > user.balance ? 'var(--danger)' : 'var(--green)' }}>
-                      ${user.balance.toFixed(2)}
-                    </div>
-                  </div>
+                <div className="mkt-cost-row">
+                  <span>Total Cost</span>
+                  <span className="mkt-cost-val">{format(parseFloat(cost))}</span>
                 </div>
-
-                {orderError && (
-                  <div style={{
-                    color: 'var(--danger)', fontSize: '12px', marginBottom: '12px',
-                    padding: '8px', borderRadius: '6px', textAlign: 'center',
-                    background: 'rgba(255,51,85,.08)', border: '1px solid rgba(255,51,85,.2)'
-                  }}>
-                    {orderError}
-                  </div>
-                )}
-
-                {/* Auto-fulfillment badge */}
-                {selected.provider_api_url && selected.provider_api_key && selected.provider_service_id ? (
-                  <div style={{
-                    padding: '8px 12px', borderRadius: '7px', marginBottom: '12px',
-                    background: 'rgba(0,255,136,.06)', border: '1px solid rgba(0,255,136,.18)',
-                    fontSize: '11px', color: 'var(--green)', display: 'flex', gap: '6px', alignItems: 'center'
-                  }}>
-                    <span>⚡</span>
-                    <span>This service is auto-fulfilled — your order starts immediately after payment.</span>
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: '8px 12px', borderRadius: '7px', marginBottom: '12px',
-                    background: 'rgba(0,212,255,.05)', border: '1px solid rgba(0,212,255,.12)',
-                    fontSize: '11px', color: 'var(--text3)',
-                  }}>
-                    📋 Admin-fulfilled — your order will be processed by our team.
-                  </div>
-                )}
-
-                <button
-                  className="btn bp blg bw"
-                  onClick={placeOrder}
-                  disabled={ordering || parseFloat(cost) > user.balance}>
-                  <span>{ordering ? (providerStatus === 'sending' ? '⚡ Sending to provider...' : 'Placing Order...') : `Place Order — $${cost}`}</span>
-                  <span>→</span>
+                {orderError && <div className="mkt-error">{orderError}</div>}
+                <button className="btn bp blg bw mkt-place-btn" onClick={placeOrder} disabled={ordering}>
+                  {ordering ? '⏳ Processing...' : `⚡ Place Order — ${format(parseFloat(cost))}`}
                 </button>
               </>
             )}
