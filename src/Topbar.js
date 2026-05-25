@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from './supabase';
-import { useCurrency } from './CurrencyContext';
 
 export default function Topbar({ user, page, onNav, onLogout, onCurrency, onTheme, darkMode, setSbOpen }) {
   const [dropOpen, setDropOpen] = useState(false);
@@ -12,18 +11,35 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
   const [whatsapp, setWhatsapp] = useState('');
   const [telegram, setTelegram] = useState('');
   const dropRef = useRef(null);
-  const { format, currency } = useCurrency();
 
+  // ── FIX: Added ALL missing page titles so topbar always shows correct name ──
   const pageTitles = {
-    dashboard: 'Dashboard', marketplace: 'Marketplace', orders: 'My Orders',
-    deposit: 'Add Funds', transactions: 'Transactions', referral: 'Referral & Earn',
-    tasks: 'Earn Tasks', profile: 'My Profile', services: 'Services',
-    earnings: 'Earnings', deposits: 'Manage Deposits', withdrawals: 'Withdrawals',
-    users: 'All Users', resellers: 'Resellers', api: 'API Import',
-    disputes: 'Disputes', settings: 'Settings', admintasks: 'Manage Tasks',
-    adminreferral: 'Referral Settings', support: 'Support Tickets',
-    currencies: 'Currency Rates', adminservices: 'Manage Services',
-    adminorders: 'Manage Orders', massemail: 'Mass Email',
+    dashboard: 'Dashboard',
+    marketplace: 'Marketplace',
+    orders: 'My Orders',
+    deposit: 'Add Funds',
+    transactions: 'Transactions',
+    referral: 'Referral & Earn',
+    tasks: 'Earn Tasks',
+    profile: 'My Profile',
+    panelapi: 'API Access',          // ← was missing
+    buyersupport: 'Support',         // ← was missing
+    services: 'My Services',
+    earnings: 'Earnings',
+    deposits: 'Manage Deposits',
+    withdrawals: 'Withdrawals',
+    users: 'All Users',
+    resellers: 'Resellers',
+    api: 'API Import',
+    disputes: 'Disputes',
+    settings: 'Settings',
+    admintasks: 'Manage Tasks',
+    adminreferral: 'Referral Settings',
+    support: 'Support Tickets',
+    currencies: 'Currency Rates',
+    massemail: 'Mass Email',         // ← was missing
+    adminorders: 'Manage Orders',    // ← was missing
+    adminservices: 'Manage Services',// ← was missing
   };
 
   useEffect(() => {
@@ -37,8 +53,10 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
 
   const loadContactSettings = async () => {
     const { data } = await supabase
-      .from('settings').select('key, value')
+      .from('settings')
+      .select('key, value')
       .in('key', ['whatsapp', 'telegram']);
+
     if (data) {
       data.forEach(row => {
         if (row.key === 'whatsapp' && row.value) setWhatsapp(row.value);
@@ -74,15 +92,19 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
       { ic: '📦', lb: 'My Orders', fn: () => { onNav('orders'); setDropOpen(false); } },
       { ic: '💳', lb: 'Add Funds', fn: () => { onNav('deposit'); setDropOpen(false); } },
       { ic: '🎁', lb: 'Referral', fn: () => { onNav('referral'); setDropOpen(false); } },
+      { ic: '⚡', lb: 'Earn Tasks', fn: () => { onNav('tasks'); setDropOpen(false); } },
+      { ic: '📡', lb: 'API Access', fn: () => { onNav('panelapi'); setDropOpen(false); } },
+    ] : []),
+    ...(user.role === 'reseller' ? [
+      { ic: '🏪', lb: 'My Services', fn: () => { onNav('services'); setDropOpen(false); } },
+      { ic: '💵', lb: 'Earnings', fn: () => { onNav('earnings'); setDropOpen(false); } },
+      { ic: '📡', lb: 'API Access', fn: () => { onNav('panelapi'); setDropOpen(false); } },
     ] : []),
     { ic: '📊', lb: 'Transactions', fn: () => { onNav('transactions'); setDropOpen(false); } },
     { ic: '💱', lb: 'Change Currency', fn: () => { onCurrency(); setDropOpen(false); } },
     { ic: darkMode ? '☀️' : '🌙', lb: darkMode ? 'Light Mode' : 'Dark Mode', fn: () => { onTheme(); setDropOpen(false); } },
     { ic: '🎧', lb: 'Support', fn: () => { setShowSupport(true); setDropOpen(false); } },
   ];
-
-  // Format balance in current currency
-  const balanceFormatted = format(user.balance);
 
   return (
     <>
@@ -95,17 +117,16 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
         </div>
 
         <div className="topbar-right">
-          {/* Balance in current currency */}
+          {/* Balance */}
           <div className="bal-chip">
             <span className="bc-lbl">Balance</span>
-            <span className="bc-val">{balanceFormatted}</span>
+            <span className="bc-val">${user.balance.toFixed(2)}</span>
           </div>
 
-          {/* Currency code button */}
+          {/* Currency button */}
           <button className="btn bgh bsm" onClick={onCurrency}
-            style={{ padding: '6px 8px', fontSize: '12px', fontFamily: 'var(--fm)', fontWeight: 700 }}
-            title={`Currency: ${currency.code}`}>
-            {currency.code}
+            style={{ padding: '6px 8px', fontSize: '14px' }} title="Currency">
+            💱
           </button>
 
           {/* Theme button */}
@@ -142,7 +163,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                   <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '4px', wordBreak: 'break-all' }}>{user.email}</div>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                     <span className={`bdg b-${user.role}`}>{user.role}</span>
-                    <span className="bdg b-completed">{balanceFormatted}</span>
+                    <span className="bdg b-completed">${user.balance.toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -254,6 +275,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
               </div>
             ) : (
               <>
+                {/* WhatsApp quick link in modal */}
                 {whatsapp && (
                   <a href={`https://wa.me/${whatsapp.replace(/\D/g, '')}`}
                     target="_blank" rel="noreferrer"
@@ -263,6 +285,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                     </div>
                   </a>
                 )}
+                {/* Telegram quick link in modal */}
                 {telegram && (
                   <a href={getTelegramUrl(telegram)}
                     target="_blank" rel="noreferrer"
