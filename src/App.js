@@ -29,11 +29,29 @@ import AdminCurrencies from './AdminCurrencies';
 import AdminMassEmail from './AdminMassEmail';
 import AdminOrders from './AdminOrders';
 import AdminServices from './AdminServices';
+import AdminFilters from './AdminFilters';
 import ResellerDashboard from './ResellerDashboard';
 import ResellerServices from './ResellerServices';
 import ResellerEarnings from './ResellerEarnings';
 import SupportTicket from './SupportTicket';
 import CurrencySwitcher from './CurrencySwitcher';
+
+const pageTitles = {
+  dashboard: 'Dashboard', marketplace: 'Marketplace',
+  orders: 'My Orders', deposit: 'Add Funds',
+  transactions: 'Transactions', referral: 'Referral & Earn',
+  tasks: 'Earn Tasks', profile: 'My Profile',
+  panelapi: 'API Access', services: 'Services',
+  earnings: 'Earnings', deposits: 'Manage Deposits',
+  withdrawals: 'Withdrawals', users: 'All Users',
+  resellers: 'Resellers', api: 'API Import',
+  disputes: 'Disputes', settings: 'Settings',
+  admintasks: 'Manage Tasks', adminreferral: 'Referral Settings',
+  support: 'Support Tickets', currencies: 'Currency Rates',
+  massemail: 'Mass Email', buyersupport: 'Support',
+  adminorders: 'Manage Orders', adminservices: 'Manage Services',
+  adminfilters: 'Manage Filters',
+};
 
 const buyerNav = [
   { ic: '🏠', lb: 'Home', id: 'dashboard' },
@@ -118,19 +136,6 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // ── FIX: Auto-refresh user balance every 30 seconds while logged in ──────
-  useEffect(() => {
-    if (!user) return;
-    const interval = setInterval(async () => {
-      const { data } = await supabase
-        .from('users').select('balance').eq('id', user.id).maybeSingle();
-      if (data) {
-        setUser(prev => prev ? { ...prev, balance: parseFloat(data.balance || 0) } : prev);
-      }
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [user?.id]);
-
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null); setScreen('landing'); setPage('dashboard');
@@ -180,6 +185,7 @@ export default function App() {
       if (page === 'dashboard') return <AdminDashboard user={user} onNav={setPage} />;
       if (page === 'adminorders') return <AdminOrders />;
       if (page === 'adminservices') return <AdminServices />;
+      if (page === 'adminfilters') return <AdminFilters />;
       if (page === 'deposits') return <AdminDeposits />;
       if (page === 'users') return <AdminUsers />;
       if (page === 'settings') return <AdminSettings />;
@@ -193,7 +199,6 @@ export default function App() {
       if (page === 'currencies') return <AdminCurrencies />;
       if (page === 'massemail') return <AdminMassEmail />;
       if (page === 'profile') return <Profile user={user} onLogout={logout} />;
-      if (page === 'transactions') return <Transactions user={user} />;
     }
     if (user.role === 'reseller') {
       if (page === 'dashboard') return <ResellerDashboard user={user} onNav={setPage} />;
@@ -202,14 +207,12 @@ export default function App() {
       if (page === 'transactions') return <Transactions user={user} />;
       if (page === 'deposit') return <Deposit user={user} />;
       if (page === 'panelapi') return <PanelApi user={user} />;
-      if (page === 'buyersupport') return <SupportTicket user={user} />;
-      if (page === 'referral') return <Referral user={user} />;
       if (page === 'profile') return <Profile user={user} onLogout={logout} />;
     }
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: '12px', textAlign: 'center', padding: '20px' }}>
         <div style={{ fontSize: '40px' }}>🚧</div>
-        <div style={{ fontFamily: 'var(--fd)', fontSize: '14px', color: 'var(--neon)', letterSpacing: '2px' }}>{page}</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '14px', color: 'var(--neon)', letterSpacing: '2px' }}>{pageTitles[page] || page}</div>
         <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Coming soon</div>
         <button className="btn bgh bsm" onClick={() => setPage('dashboard')}>← Back</button>
       </div>
