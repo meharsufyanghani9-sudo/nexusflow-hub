@@ -20,6 +20,9 @@ const menus = {
     { ic: '📊', lb: 'Transactions', id: 'transactions' },
     { ic: '💳', lb: 'Add Funds', id: 'deposit' },
     { ic: '📡', lb: 'API Access', id: 'panelapi' },
+    { ic: '🎁', lb: 'Referral & Earn', id: 'referral' },
+    // ── FIX: Added Support link for resellers ──
+    { ic: '💬', lb: 'Support', id: 'buyersupport' },
     { ic: '👤', lb: 'Profile', id: 'profile' },
   ],
   admin: [
@@ -38,6 +41,8 @@ const menus = {
     { ic: '💬', lb: 'Support Tickets', id: 'support' },
     { ic: '📨', lb: 'Mass Email', id: 'massemail' },
     { ic: '⚙️', lb: 'Settings', id: 'settings' },
+    // ── FIX: Added Transactions link for admin ──
+    { ic: '📊', lb: 'Transactions', id: 'transactions' },
     { ic: '👤', lb: 'Profile', id: 'profile' },
   ],
 };
