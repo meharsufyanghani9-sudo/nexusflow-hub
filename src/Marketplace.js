@@ -185,27 +185,38 @@ export default function Marketplace({ user, onNav }) {
     });
 
     // Auto-send to provider API
-    if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
+    // Use provider_service_id first, fall back to provider_id
+    const providerServiceId = selected.provider_service_id || selected.provider_id;
+    if (selected.provider_api_url && selected.provider_api_key && providerServiceId) {
       try {
-        const res = await fetch('https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy', {
+        // Call provider API directly via our /api/proxy endpoint
+        const res = await fetch('/api/proxy', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            url: selected.provider_api_url, key: selected.provider_api_key,
-            action: 'add', service: selected.provider_service_id, link, quantity: q,
+            url: selected.provider_api_url,
+            key: selected.provider_api_key,
+            action: 'add',
+            service: providerServiceId,
+            link,
+            quantity: q,
           }),
         });
         const providerData = await res.json();
+        console.log('Provider response:', providerData); // for debugging
         if (providerData?.order) {
           await supabase.from('orders').update({
-            vendor_order_id: String(providerData.order), status: 'in_progress',
+            vendor_order_id: String(providerData.order),
+            status: 'in_progress',
           }).eq('order_ref', orderRef);
         } else if (providerData?.error) {
           await supabase.from('orders').update({
             provider_note: `Provider error: ${providerData.error}`,
+            status: 'pending',
+          }).eq('order_ref', orderRef);
+        } else {
+          await supabase.from('orders').update({
+            provider_note: `Provider response: ${JSON.stringify(providerData)}`,
           }).eq('order_ref', orderRef);
         }
       } catch (e) {
