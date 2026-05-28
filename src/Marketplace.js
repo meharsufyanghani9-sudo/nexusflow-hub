@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
@@ -27,6 +27,8 @@ export default function Marketplace({ user, onNav }) {
   const [lsLoading, setLsLoading]       = useState(false);
   const [lsHasMore, setLsHasMore]       = useState(true);
   const [lsServices, setLsServices]     = useState([]);
+
+  const sentinelRef = useRef(null); // for infinite scroll
 
   // ─── Filter state ─────────────────────────────────────────
   const [adminFilters, setAdminFilters] = useState([]);   // from service_filters table
@@ -84,6 +86,23 @@ export default function Marketplace({ user, onNav }) {
     }
     setLsLoading(false);
   }, []);
+
+  // ─── Infinite scroll observer ────────────────────────────
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && lsHasMore && !lsLoading && !search && !stage1 && !stage2 && !stage3) {
+          const next = lsPage + 1;
+          setLsPage(next);
+          loadLivePage(next);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [lsHasMore, lsLoading, lsPage, loadLivePage, search, stage1, stage2, stage3]);
 
   const handleTabSwitch = (tab) => {
     setLiveTab(tab);
@@ -284,7 +303,7 @@ export default function Marketplace({ user, onNav }) {
               <div className="empty-sb">Admin hasn't featured any services</div>
             </div>
           ) : (
-            <div className="mkt-grid">
+            <div className="mkt-grid" style={{ gridTemplateColumns:'repeat(2,1fr)' }}>
               {allServices.map(s => <ServiceCard key={s.id} s={s} />)}
             </div>
           )}
@@ -381,18 +400,12 @@ export default function Marketplace({ user, onNav }) {
                 {sortedLive.map(s => <ServiceCard key={s.id} s={s} />)}
               </div>
 
-              {/* LOAD MORE */}
-              {lsHasMore && !search && !stage1 && !stage2 && !stage3 && (
-                <div style={{ textAlign:'center', marginTop:'20px' }}>
-                  <button className="btn bgh bmd" onClick={() => {
-                    const next = lsPage + 1;
-                    setLsPage(next);
-                    loadLivePage(next);
-                  }} disabled={lsLoading}>
-                    {lsLoading ? '⏳ Loading...' : '▼ Load More Services'}
-                  </button>
-                </div>
-              )}
+              {/* INFINITE SCROLL SENTINEL */}
+              <div ref={sentinelRef} style={{ height:'40px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                {lsLoading && lsServices.length > 0 && (
+                  <div style={{ width:'20px', height:'20px', border:'2px solid var(--br)', borderTopColor:'var(--neon)', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />
+                )}
+              </div>
             </>
           )}
         </>
