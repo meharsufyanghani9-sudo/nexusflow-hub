@@ -11,7 +11,6 @@ const empty = {
   price_per_1k: '', min_qty: 100, max_qty: 10000,
   is_active: true, is_featured: false, category: '',
   provider_id: '', provider_service_id: '', provider_api_url: '', provider_api_key: '',
-  has_refill: false, refill_days: 30,
 };
 
 export default function AdminServices() {
@@ -41,23 +40,23 @@ export default function AdminServices() {
 
   const loadServices = async () => {
     setLoading(true);
-    // Paginate to load ALL services — bypasses the 1000-row Supabase default limit
+    // Supabase max is 1000 per query — loop to fetch ALL services
     let allData = [];
     let from = 0;
-    const PAGE = 1000;
+    const BATCH = 1000;
     while (true) {
       const { data, error } = await supabase
         .from('services').select('*')
         .order('created_at', { ascending: false })
-        .range(from, from + PAGE - 1);
+        .range(from, from + BATCH - 1);
       if (error || !data || data.length === 0) break;
       allData = [...allData, ...data];
-      if (data.length < PAGE) break;
-      from += PAGE;
+      if (data.length < BATCH) break;
+      from += BATCH;
     }
     setServices(allData);
     setLoading(false);
-    setSelected(new Set()); // clear selection on reload
+    setSelected(new Set());
   };
 
   // ── Filtering ─────────────────────────────────────────────
@@ -159,8 +158,6 @@ export default function AdminServices() {
       provider_service_id: s.provider_service_id || '',
       provider_api_url: s.provider_api_url || '',
       provider_api_key: s.provider_api_key || '',
-      has_refill: s.has_refill || false,
-      refill_days: s.refill_days || 30,
     });
     setEditing(s.id);
     setMsg('');
@@ -180,8 +177,6 @@ export default function AdminServices() {
       provider_service_id: form.provider_service_id,
       provider_api_url: form.provider_api_url,
       provider_api_key: form.provider_api_key,
-      has_refill: form.has_refill,
-      refill_days: parseInt(form.refill_days) || 30,
     };
     let error;
     if (editing) {
@@ -472,7 +467,7 @@ export default function AdminServices() {
               </div>
             </div>
 
-            <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', marginTop: '6px' }}>Visibility & Refill</div>
+            <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', marginTop: '6px' }}>Visibility</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
               {[
                 { key: 'is_active', label: '✅ Active', desc: 'Visible to buyers on marketplace' },
@@ -494,31 +489,6 @@ export default function AdminServices() {
                   <div style={{ fontSize: '9px', color: 'var(--text3)', paddingLeft: '24px' }}>{opt.desc}</div>
                 </div>
               ))}
-            </div>
-
-            {/* Refill Guarantee */}
-            <div className="card" style={{ padding: '12px', marginBottom: '12px', cursor: 'pointer' }}
-              onClick={() => setForm(f => ({ ...f, has_refill: !f.has_refill }))}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: f.has_refill ? '8px' : '0' }}>
-                <div style={{
-                  width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0,
-                  border: `2px solid ${form.has_refill ? 'var(--green)' : 'var(--br2)'}`,
-                  background: form.has_refill ? 'var(--green)' : 'transparent',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}>
-                  {form.has_refill && <span style={{ fontSize: '10px', color: '#000', fontWeight: 900 }}>✓</span>}
-                </div>
-                <span style={{ fontSize: '11px', fontWeight: 700 }}>🔄 Refill Guarantee</span>
-                <span style={{ fontSize: '10px', color: 'var(--text3)' }}>Buyers can request refill if drops</span>
-              </div>
-              {form.has_refill && (
-                <div style={{ paddingLeft: '24px' }} onClick={e => e.stopPropagation()}>
-                  <label className="fl" style={{ fontSize: '10px' }}>Refill Guarantee (days)</label>
-                  <input className="inp" type="number" value={form.refill_days}
-                    onChange={e => setForm(f => ({ ...f, refill_days: e.target.value }))}
-                    placeholder="30" style={{ marginTop: '4px' }} />
-                </div>
-              )}
             </div>
 
             <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '6px', marginTop: '6px' }}>
