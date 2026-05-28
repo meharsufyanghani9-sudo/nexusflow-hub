@@ -1,177 +1,141 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
 const platformIcons = {
-  instagram: '📸', tiktok: '🎵', youtube: '▶️', twitter: '🐦',
-  facebook: '👤', telegram: '✈️', snapchat: '👻', linkedin: '💼',
-  spotify: '🎵', discord: '🎮', twitch: '🎮', custom: '⚙️'
+  instagram:'📸', tiktok:'🎵', youtube:'▶️', twitter:'🐦',
+  facebook:'👍', telegram:'✈️', snapchat:'👻', linkedin:'💼',
+  spotify:'🎶', discord:'🎮', twitch:'🟣', whatsapp:'💬',
+  custom:'⚙️'
 };
 const platformColors = {
-  instagram: '#E1306C', tiktok: '#00d4ff', youtube: '#FF0000',
-  twitter: '#1DA1F2', facebook: '#1877F2', telegram: '#0088cc',
-  snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff'
+  instagram:'#E1306C', tiktok:'#00d4ff', youtube:'#FF0000',
+  twitter:'#1DA1F2', facebook:'#1877F2', telegram:'#0088cc',
+  snapchat:'#FFFC00', linkedin:'#0077B5', whatsapp:'#25D366',
+  custom:'#7b2fff'
 };
 
-// ─── BUILT-IN QUALITY FILTERS ───────────────────────────────────────────────
-// These are always available and work by matching service name/description or
-// the has_refill field on the service.
-const builtInFilters = [
-  { id: 'with_refill',  label: '🔄 With Refill',   color: '#00ff88' },
-  { id: 'no_refill',   label: '🚫 No Refill',      color: '#ff3355' },
-  { id: 'non_drop',    label: '💎 Non-Drop',        color: '#00d4ff' },
-  { id: 'guaranteed',  label: '✅ Guaranteed',      color: '#00d4ff' },
-  { id: 'fast',        label: '⚡ Fast Delivery',   color: '#ffb800' },
-  { id: 'budget',      label: '💰 Budget',          color: '#ffd700' },
-  { id: 'instant',     label: '🚀 Instant Start',   color: '#a86bff' },
-  { id: 'hq',          label: '🏆 High Quality',    color: '#ff9900' },
-];
+const PAGE_SIZE = 15;
 
 export default function Marketplace({ user, onNav }) {
   const { format } = useCurrency();
-  const [services, setServices] = useState([]);
-  const [customFilters, setCustomFilters] = useState([]); // filters created by admin
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [platform, setPlatform] = useState('');
-  const [category, setCategory] = useState('');
-  const [activeFilter, setActiveFilter] = useState(''); // built-in filter id OR custom filter id
-  const [showAll, setShowAll] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [link, setLink] = useState('');
-  const [qty, setQty] = useState('');
-  const [ordering, setOrdering] = useState(false);
-  const [ordered, setOrdered] = useState(false);
-  const [orderError, setOrderError] = useState('');
 
+  // ─── Services state ───────────────────────────────────────
+  const [allServices, setAllServices]   = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [lsPage, setLsPage]             = useState(1);
+  const [lsLoading, setLsLoading]       = useState(false);
+  const [lsHasMore, setLsHasMore]       = useState(true);
+  const [lsServices, setLsServices]     = useState([]);
+
+  // ─── Filter state ─────────────────────────────────────────
+  const [adminFilters, setAdminFilters] = useState([]);   // from service_filters table
+  const [stage1, setStage1]             = useState('');   // platform
+  const [stage2, setStage2]             = useState('');   // service type (filter id)
+  const [stage3, setStage3]             = useState('');   // quality tag (filter id)
+  const [search, setSearch]             = useState('');
+  const [priceSort, setPriceSort]       = useState('');   // 'asc' | 'desc' | ''
+  const [liveTab, setLiveTab]           = useState('featured'); // 'featured' | 'live'
+
+  // ─── Order modal ──────────────────────────────────────────
+  const [selected, setSelected]         = useState(null);
+  const [link, setLink]                 = useState('');
+  const [qty, setQty]                   = useState('');
+  const [ordering, setOrdering]         = useState(false);
+  const [ordered, setOrdered]           = useState(false);
+  const [orderError, setOrderError]     = useState('');
+
+  // ─── Load admin-defined filters ──────────────────────────
   useEffect(() => {
-    loadServices();
-    loadCustomFilters();
+    supabase.from('service_filters')
+      .select('*').eq('is_active', true).order('sort_order')
+      .then(({ data }) => { if (data) setAdminFilters(data); });
   }, []);
 
-  // ─── Load all active services ───────────────────────────────────────────
-  const loadServices = async () => {
+  // ─── Load featured / all services ─────────────────────────
+  useEffect(() => {
+    loadFeatured();
+  }, []);
+
+  const loadFeatured = async () => {
     setLoading(true);
-    // Paginate to bypass Supabase's 1000-row default limit
-    let allData = [];
-    let from = 0;
-    const PAGE = 1000;
-    while (true) {
-      const { data, error } = await supabase
-        .from('services')
-        .select('*')
-        .eq('is_active', true)
-        .order('is_featured', { ascending: false })
-        .order('created_at', { ascending: false })
-        .range(from, from + PAGE - 1);
-      if (error || !data || data.length === 0) break;
-      allData = [...allData, ...data];
-      if (data.length < PAGE) break;
-      from += PAGE;
-    }
-    setServices(allData);
+    const { data } = await supabase
+      .from('services').select('*')
+      .eq('is_active', true)
+      .eq('is_featured', true)
+      .order('created_at', { ascending: false });
+    if (data) setAllServices(data);
     setLoading(false);
   };
 
-  // ─── Load custom filters that admin created ──────────────────────────────
-  const loadCustomFilters = async () => {
-    // We store custom filters in the "service_filters" table.
-    // If the table doesn't exist yet, this will just return empty — no crash.
-    try {
-      const { data } = await supabase
-        .from('service_filters')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true });
-      if (data) setCustomFilters(data);
-    } catch (e) {
-      // Table not created yet — that's fine, filters just won't show
+  // ─── Paginated live services loader ───────────────────────
+  const loadLivePage = useCallback(async (pageNum, reset = false) => {
+    setLsLoading(true);
+    const from = (pageNum - 1) * PAGE_SIZE;
+    const to   = from + PAGE_SIZE - 1;
+    const { data } = await supabase
+      .from('services').select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    if (data) {
+      setLsServices(prev => reset ? data : [...prev, ...data]);
+      setLsHasMore(data.length === PAGE_SIZE);
+    }
+    setLsLoading(false);
+  }, []);
+
+  const handleTabSwitch = (tab) => {
+    setLiveTab(tab);
+    if (tab === 'live' && lsServices.length === 0) {
+      loadLivePage(1, true);
     }
   };
 
-  const featuredServices = services.filter(s => s.is_featured);
-  const otherServices = services.filter(s => !s.is_featured);
-  const availablePlatforms = [...new Set(otherServices.map(s => s.platform))].filter(Boolean);
+  // ─── Filter live services in-memory ───────────────────────
+  const filterServiceIds = (filterCategory) => {
+    // returns set of service IDs that match a filter's service_ids list
+    const f = adminFilters.find(f => f.id === filterCategory);
+    if (!f || !f.service_ids || f.service_ids.length === 0) return null;
+    return new Set(f.service_ids.map(String));
+  };
 
-  // Categories for selected platform
-  const platformSvcs = platform ? otherServices.filter(s => s.platform === platform) : otherServices;
-  const availableCategories = [...new Set(platformSvcs.map(s => s.category).filter(Boolean))];
-
-  // ─── Apply all filters ───────────────────────────────────────────────────
-  const filteredServices = platformSvcs.filter(s => {
-    // Category filter
-    if (category && s.category !== category) return false;
-    // Search filter
-    if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
-
-    // Active filter — either built-in or custom
-    if (activeFilter) {
-      // Check if it's a custom filter (custom filters have numeric or uuid IDs)
-      const customFilter = customFilters.find(f => String(f.id) === String(activeFilter));
-      if (customFilter) {
-        // Custom filter: service must be in the filter's service_ids array
-        const ids = customFilter.service_ids || [];
-        if (!ids.includes(s.id)) return false;
-      } else {
-        // Built-in filter: match by name/description text or has_refill field
-        const nameDesc = (s.name + ' ' + (s.description || '')).toLowerCase();
-
-        if (activeFilter === 'with_refill') {
-          // WITH REFILL: only services where has_refill is true
-          // OR name/description says "with refill" or "refill guarantee"
-          const hasRefillField = s.has_refill === true || s.has_refill === 'true';
-          const mentionsRefill = nameDesc.includes('with refill') || nameDesc.includes('refill guarantee') || nameDesc.includes('refillable');
-          if (!hasRefillField && !mentionsRefill) return false;
-        }
-
-        if (activeFilter === 'no_refill') {
-          // NO REFILL: services where has_refill is false AND no "with refill" mention
-          const hasRefillField = s.has_refill === true || s.has_refill === 'true';
-          const mentionsWithRefill = nameDesc.includes('with refill') || nameDesc.includes('refill guarantee') || nameDesc.includes('refillable');
-          // Keep the service only if it does NOT have refill
-          if (hasRefillField || mentionsWithRefill) return false;
-        }
-
-        if (activeFilter === 'non_drop') {
-          if (!nameDesc.includes('non-drop') && !nameDesc.includes('nondrop') && !nameDesc.includes('non drop')) return false;
-        }
-
-        if (activeFilter === 'guaranteed') {
-          if (!nameDesc.includes('guaranteed') && !nameDesc.includes('guarantee')) return false;
-        }
-
-        if (activeFilter === 'fast') {
-          if (!nameDesc.includes('fast') && !nameDesc.includes('instant') && !nameDesc.includes('speed')) return false;
-        }
-
-        if (activeFilter === 'instant') {
-          if (!nameDesc.includes('instant') && !nameDesc.includes('0-1h') && !nameDesc.includes('0-1 h') && !nameDesc.includes('start: 0')) return false;
-        }
-
-        if (activeFilter === 'hq') {
-          if (!nameDesc.includes('high quality') && !nameDesc.includes('hq') && !nameDesc.includes('premium') && !nameDesc.includes('real')) return false;
-        }
-
-        if (activeFilter === 'budget') {
-          // Cheapest 30% of services by price
-          const prices = otherServices
-            .map(x => parseFloat(x.price_per_1k || 0))
-            .sort((a, b) => a - b);
-          const threshold = prices[Math.floor(prices.length * 0.3)] ?? 9999;
-          if (parseFloat(s.price_per_1k || 0) > threshold) return false;
-        }
-      }
+  const filteredLive = lsServices.filter(s => {
+    if (stage1 && s.platform !== stage1) return false;
+    if (stage2) {
+      const ids = filterServiceIds(stage2);
+      if (ids && !ids.has(String(s.id))) return false;
     }
-
+    if (stage3) {
+      const ids = filterServiceIds(stage3);
+      if (ids && !ids.has(String(s.id))) return false;
+    }
+    if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
-  // ─── Order cost calculation ──────────────────────────────────────────────
+  const sortedLive = priceSort
+    ? [...filteredLive].sort((a, b) =>
+        priceSort === 'asc'
+          ? parseFloat(a.price_per_1k) - parseFloat(b.price_per_1k)
+          : parseFloat(b.price_per_1k) - parseFloat(a.price_per_1k)
+      )
+    : filteredLive;
+
+  // ─── Derive filter groups ─────────────────────────────────
+  // We expect admin to tag filters with a "filter_type": 'platform'|'service_type'|'quality'
+  // Fall back: derive platforms from live services
+  const platforms = [...new Set(lsServices.map(s => s.platform).filter(Boolean))];
+
+  const stage2Filters = adminFilters.filter(f => f.filter_type === 'service_type');
+  const stage3Filters = adminFilters.filter(f => f.filter_type === 'quality');
+
+  // ─── Cost calc ────────────────────────────────────────────
   const cost = selected && qty
     ? (parseFloat(qty) / 1000 * parseFloat(selected.price_per_1k)).toFixed(4)
     : '0.00';
 
-  // ─── Place order ─────────────────────────────────────────────────────────
+  // ─── Place order ──────────────────────────────────────────
   const placeOrder = async () => {
     setOrderError('');
     if (!link) { setOrderError('Enter your link'); return; }
@@ -187,12 +151,9 @@ export default function Marketplace({ user, onNav }) {
     const orderRef = 'NF-' + Date.now();
 
     const { error: orderErr } = await supabase.from('orders').insert({
-      order_ref: orderRef,
-      user_id: user.id,
-      service_id: selected.id,
-      service_name: selected.name,
-      platform: selected.platform,
-      link, quantity: q, cost: totalCost,
+      order_ref: orderRef, user_id: user.id,
+      service_id: selected.id, service_name: selected.name,
+      platform: selected.platform, link, quantity: q, cost: totalCost,
       status: 'pending', progress: 0,
     });
     if (orderErr) { setOrderError('Order failed: ' + orderErr.message); setOrdering(false); return; }
@@ -203,7 +164,7 @@ export default function Marketplace({ user, onNav }) {
       description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // Fully automatic: send to provider API if configured
+    // Auto-send to provider API
     if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
       try {
         const res = await fetch('https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy', {
@@ -213,20 +174,16 @@ export default function Marketplace({ user, onNav }) {
             'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
           },
           body: JSON.stringify({
-            url: selected.provider_api_url,
-            key: selected.provider_api_key,
-            action: 'add',
-            service: selected.provider_service_id,
-            link, quantity: q,
+            url: selected.provider_api_url, key: selected.provider_api_key,
+            action: 'add', service: selected.provider_service_id, link, quantity: q,
           }),
         });
         const providerData = await res.json();
-        if (providerData && providerData.order) {
+        if (providerData?.order) {
           await supabase.from('orders').update({
-            vendor_order_id: String(providerData.order),
-            status: 'in_progress',
+            vendor_order_id: String(providerData.order), status: 'in_progress',
           }).eq('order_ref', orderRef);
-        } else if (providerData && providerData.error) {
+        } else if (providerData?.error) {
           await supabase.from('orders').update({
             provider_note: `Provider error: ${providerData.error}`,
           }).eq('order_ref', orderRef);
@@ -246,274 +203,222 @@ export default function Marketplace({ user, onNav }) {
   const ic = (p) => platformIcons[p] || '⚙️';
   const cl = (p) => platformColors[p] || '#7b2fff';
 
-  // ─── Service Card ─────────────────────────────────────────────────────────
   const ServiceCard = ({ s }) => (
     <div
       className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
       onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
       {s.is_featured && (
         <div style={{
-          position: 'absolute', top: '-1px', right: '10px',
-          background: 'linear-gradient(135deg,var(--gold2),var(--gold))',
-          color: '#000', fontSize: '8px', fontWeight: 800, padding: '3px 8px',
-          borderRadius: '0 0 6px 6px', letterSpacing: '1px', fontFamily: 'var(--fd)'
+          position:'absolute', top:'-1px', right:'10px',
+          background:'linear-gradient(135deg,var(--gold2),var(--gold))',
+          color:'#000', fontSize:'8px', fontWeight:800, padding:'3px 8px',
+          borderRadius:'0 0 6px 6px', letterSpacing:'1px', fontFamily:'var(--fd)'
         }}>⭐ FEATURED</div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-        <span style={{ fontSize: '22px' }}>{ic(s.platform)}</span>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
-          <span style={{
-            fontSize: '9px', padding: '2px 7px', borderRadius: '10px', fontWeight: 700,
-            background: `${cl(s.platform)}18`, color: cl(s.platform),
-            border: `1px solid ${cl(s.platform)}30`, textTransform: 'uppercase', letterSpacing: '1px'
-          }}>{s.platform}</span>
-          {/* Show refill badge if service has refill */}
-          {(s.has_refill === true || s.has_refill === 'true') && (
-            <span style={{
-              fontSize: '8px', padding: '1px 5px', borderRadius: '8px', fontWeight: 700,
-              background: 'rgba(0,255,136,.1)', color: 'var(--green)',
-              border: '1px solid rgba(0,255,136,.25)'
-            }}>🔄 Refill</span>
-          )}
-        </div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px' }}>
+        <span style={{ fontSize:'22px' }}>{ic(s.platform)}</span>
+        <span style={{
+          fontSize:'9px', padding:'2px 7px', borderRadius:'10px', fontWeight:700,
+          background:`${cl(s.platform)}18`, color:cl(s.platform),
+          border:`1px solid ${cl(s.platform)}30`, textTransform:'uppercase', letterSpacing:'1px'
+        }}>{s.platform}</span>
       </div>
-      <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px', color: 'var(--text)' }}>{s.name}</div>
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px', flex: 1, lineHeight: 1.5 }}>{s.description}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+      <div style={{ fontWeight:700, fontSize:'13px', marginBottom:'4px', color:'var(--text)' }}>{s.name}</div>
+      <div style={{ fontSize:'11px', color:'var(--text3)', marginBottom:'12px', flex:1, lineHeight:1.5 }}>{s.description}</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'auto' }}>
         <div>
-          <div style={{ fontFamily: 'var(--fm)', fontSize: '15px', fontWeight: 700, color: 'var(--gold)' }}>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'15px', fontWeight:700, color:'var(--gold)' }}>
             {format(parseFloat(s.price_per_1k))}
           </div>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>per 1,000</div>
+          <div style={{ fontSize:'9px', color:'var(--text3)' }}>per 1,000</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Min: {(s.min_qty || 0).toLocaleString()}</div>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Max: {(s.max_qty || 0).toLocaleString()}</div>
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:'9px', color:'var(--text3)' }}>Min: {(s.min_qty||0).toLocaleString()}</div>
+          <div style={{ fontSize:'9px', color:'var(--text3)' }}>Max: {(s.max_qty||0).toLocaleString()}</div>
         </div>
       </div>
-      <button className="btn bp bsm bw" style={{ marginTop: '12px' }}>Order Now →</button>
+      <button className="btn bp bsm bw" style={{ marginTop:'12px' }}>Order Now →</button>
     </div>
   );
 
-  // ─── Filter pill style helper ─────────────────────────────────────────────
-  const filterPillStyle = (filterId, color) => {
-    const isActive = activeFilter === filterId;
-    return {
-      padding: '6px 12px', borderRadius: '20px', whiteSpace: 'nowrap', cursor: 'pointer',
-      fontSize: '11px', fontWeight: 700, border: '1px solid',
-      borderColor: isActive ? (color || 'var(--neon)') : 'var(--br)',
-      background: isActive ? `${color || '#00d4ff'}18` : 'var(--gl)',
-      color: isActive ? (color || 'var(--neon)') : 'var(--text2)',
-      transition: 'all .18s',
-      flexShrink: 0,
-    };
-  };
+  const FilterChip = ({ active, onClick, children, color }) => (
+    <button onClick={onClick} style={{
+      padding:'6px 12px', borderRadius:'20px', cursor:'pointer',
+      fontSize:'11px', fontWeight:700, letterSpacing:'0.5px', transition:'.15s',
+      background: active ? (color || 'var(--neon)') : 'var(--gl)',
+      color: active ? '#000' : 'var(--text2)',
+      border: active ? 'none' : '1px solid var(--br)',
+      whiteSpace:'nowrap', flexShrink:0,
+    }}>{children}</button>
+  );
 
   return (
     <div>
-      {/* ─── FEATURED SERVICES ─────────────────────────────────────── */}
-      {!loading && featuredServices.length > 0 && (
-        <>
-          <div className="st">⭐ Featured Services
-            <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, letterSpacing: '1px', marginLeft: '8px' }}>
-              — Handpicked by admin
-            </span>
-          </div>
-          <div className="mkt-grid" style={{ marginBottom: '24px' }}>
-            {featuredServices.map(s => <ServiceCard key={s.id} s={s} />)}
-          </div>
-        </>
-      )}
-
-      {/* ─── ALL SERVICES HEADER ────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <div className="st" style={{ margin: 0 }}>🛒 All Services</div>
-        {otherServices.length > 0 && (
-          <span style={{ fontSize: '9px', color: 'var(--text3)' }}>{otherServices.length} available</span>
-        )}
+      {/* ─── TAB SWITCHER ─── */}
+      <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
         <button
-          className="btn bgh bsm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setShowAll(!showAll)}>
-          {showAll ? '▲ Collapse' : '▼ Browse All'}
+          onClick={() => setLiveTab('featured')}
+          className={liveTab === 'featured' ? 'btn bp bmd' : 'btn bgh bmd'}
+          style={{ flex:1 }}>
+          ⭐ Featured
+        </button>
+        <button
+          onClick={() => handleTabSwitch('live')}
+          className={liveTab === 'live' ? 'btn bp bmd' : 'btn bgh bmd'}
+          style={{ flex:1 }}>
+          🛒 Live Services {lsServices.length > 0 ? `(${lsServices.length}+)` : ''}
         </button>
       </div>
 
-      {showAll && (
+      {/* ─── FEATURED TAB ─── */}
+      {liveTab === 'featured' && (
         <>
-          {/* ── PLATFORM FILTER PILLS ───────────────────────────────── */}
-          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '8px' }}>
-            <button
-              onClick={() => { setPlatform(''); setCategory(''); }}
-              style={filterPillStyle('', '#00d4ff')}>
-              🌐 All
-            </button>
-            {availablePlatforms.map(p => (
-              <button key={p}
-                onClick={() => { setPlatform(p); setCategory(''); }}
-                style={{
-                  padding: '6px 12px', borderRadius: '20px', whiteSpace: 'nowrap', cursor: 'pointer',
-                  fontSize: '11px', fontWeight: 700, border: '1px solid',
-                  borderColor: platform === p ? cl(p) : 'var(--br)',
-                  background: platform === p ? `${cl(p)}18` : 'var(--gl)',
-                  color: platform === p ? cl(p) : 'var(--text2)',
-                  flexShrink: 0,
-                }}>
-                {ic(p)} {p}
-              </button>
-            ))}
+          {loading ? (
+            <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>
+              <div style={{ fontSize:'28px', marginBottom:'10px' }}>⏳</div>Loading...
+            </div>
+          ) : allServices.length === 0 ? (
+            <div className="empty">
+              <span className="empty-ic">⭐</span>
+              <div className="empty-tx">No featured services yet</div>
+              <div className="empty-sb">Admin hasn't featured any services</div>
+            </div>
+          ) : (
+            <div className="mkt-grid">
+              {allServices.map(s => <ServiceCard key={s.id} s={s} />)}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ─── LIVE SERVICES TAB ─── */}
+      {liveTab === 'live' && (
+        <>
+          {/* STAGE 1: Platform */}
+          <div style={{ marginBottom:'12px' }}>
+            <div style={{ fontSize:'10px', color:'var(--text3)', fontFamily:'var(--fd)', letterSpacing:'2px', marginBottom:'8px' }}>
+              PLATFORM
+            </div>
+            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+              <FilterChip active={stage1===''} onClick={() => { setStage1(''); setStage2(''); setStage3(''); }}>
+                🌐 All
+              </FilterChip>
+              {platforms.map(p => (
+                <FilterChip key={p} active={stage1===p} onClick={() => { setStage1(p); setStage2(''); setStage3(''); }} color={cl(p)}>
+                  {ic(p)} {p.charAt(0).toUpperCase()+p.slice(1)}
+                </FilterChip>
+              ))}
+            </div>
           </div>
 
-          {/* ── CATEGORY FILTER (shows when platform selected) ──────── */}
-          {platform && availableCategories.length > 0 && (
-            <div style={{ marginBottom: '8px' }}>
-              <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '1.5px', marginBottom: '6px', textTransform: 'uppercase' }}>
-                Category
+          {/* STAGE 2: Service Type (admin-defined) */}
+          {stage2Filters.length > 0 && (
+            <div style={{ marginBottom:'12px' }}>
+              <div style={{ fontSize:'10px', color:'var(--text3)', fontFamily:'var(--fd)', letterSpacing:'2px', marginBottom:'8px' }}>
+                SERVICE TYPE
               </div>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => setCategory('')}
-                  style={{
-                    padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: 700,
-                    border: `1px solid ${!category ? 'var(--neon)' : 'var(--br)'}`,
-                    background: !category ? 'rgba(0,212,255,.1)' : 'var(--gl)',
-                    color: !category ? 'var(--neon)' : 'var(--text3)',
-                  }}>All</button>
-                {availableCategories.map(cat => (
-                  <button key={cat}
-                    onClick={() => setCategory(cat)}
-                    style={{
-                      padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: 700,
-                      border: `1px solid ${category === cat ? 'var(--gold)' : 'var(--br)'}`,
-                      background: category === cat ? 'rgba(255,200,0,.1)' : 'var(--gl)',
-                      color: category === cat ? 'var(--gold)' : 'var(--text3)',
-                    }}>{cat}</button>
+              <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                <FilterChip active={stage2===''} onClick={() => { setStage2(''); setStage3(''); }}>
+                  All Types
+                </FilterChip>
+                {stage2Filters.map(f => (
+                  <FilterChip key={f.id} active={stage2===f.id} onClick={() => { setStage2(f.id); setStage3(''); }}
+                    color={f.color}>
+                    {f.icon} {f.name}
+                  </FilterChip>
                 ))}
               </div>
             </div>
           )}
 
-          {/* ── QUALITY / TYPE FILTERS ──────────────────────────────── */}
-          <div style={{ marginBottom: '8px' }}>
-            <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '1.5px', marginBottom: '6px', textTransform: 'uppercase' }}>
-              Filter by Type
+          {/* STAGE 3: Quality (admin-defined) */}
+          {stage3Filters.length > 0 && (
+            <div style={{ marginBottom:'12px' }}>
+              <div style={{ fontSize:'10px', color:'var(--text3)', fontFamily:'var(--fd)', letterSpacing:'2px', marginBottom:'8px' }}>
+                QUALITY / TYPE
+              </div>
+              <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                <FilterChip active={stage3===''} onClick={() => setStage3('')}>
+                  All Quality
+                </FilterChip>
+                {stage3Filters.map(f => (
+                  <FilterChip key={f.id} active={stage3===f.id} onClick={() => setStage3(f.id)}
+                    color={f.color}>
+                    {f.icon} {f.name}
+                  </FilterChip>
+                ))}
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '6px' }}>
+          )}
 
-              {/* "All Types" clear button */}
-              <button
-                onClick={() => setActiveFilter('')}
-                style={filterPillStyle('', '#00d4ff')}>
-                🌐 All Types
-              </button>
-
-              {/* Built-in filters */}
-              {builtInFilters.map(f => (
-                <button key={f.id}
-                  onClick={() => setActiveFilter(activeFilter === f.id ? '' : f.id)}
-                  style={filterPillStyle(f.id, f.color)}>
-                  {f.label}
-                </button>
-              ))}
-
-              {/* Custom filters created by admin */}
-              {customFilters.map(f => (
-                <button key={f.id}
-                  onClick={() => setActiveFilter(activeFilter === String(f.id) ? '' : String(f.id))}
-                  style={filterPillStyle(String(f.id), f.color || '#7b2fff')}>
-                  {f.icon || '🏷'} {f.name}
-                </button>
-              ))}
-            </div>
+          {/* SEARCH + PRICE SORT */}
+          <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
+            <input className="srch-inp" style={{ flex:1, minWidth:'140px' }}
+              placeholder="🔍 Search services..."
+              value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="sel" style={{ minWidth:'140px', flexShrink:0 }}
+              value={priceSort} onChange={e => setPriceSort(e.target.value)}>
+              <option value="">💰 Price: Default</option>
+              <option value="asc">💰 Price: Low → High</option>
+              <option value="desc">💰 Price: High → Low</option>
+            </select>
           </div>
 
-          {/* ── SEARCH ──────────────────────────────────────────────── */}
-          <input className="srch-inp" style={{ width: '100%', marginBottom: '10px' }}
-            placeholder="🔍 Search services..."
-            value={search} onChange={e => setSearch(e.target.value)} />
-
-          {/* ── RESULTS COUNT ───────────────────────────────────────── */}
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '10px' }}>
-            Showing {filteredServices.length} of {otherServices.length} services
-            {activeFilter && (
-              <span style={{ color: 'var(--neon)', marginLeft: '8px' }}>
-                · Filter active
-                <button
-                  onClick={() => setActiveFilter('')}
-                  style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '11px', marginLeft: '4px' }}>
-                  ✕ Clear
-                </button>
-              </span>
-            )}
-          </div>
-
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>
-              <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>Loading services...
+          {/* SERVICE GRID */}
+          {lsLoading && lsServices.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>
+              <div style={{ fontSize:'28px', marginBottom:'10px' }}>⏳</div>Loading services...
             </div>
-          ) : filteredServices.length === 0 ? (
+          ) : sortedLive.length === 0 && !lsLoading ? (
             <div className="empty">
               <span className="empty-ic">🔍</span>
-              <div className="empty-tx">{otherServices.length === 0 ? 'No services available' : 'No services match this filter'}</div>
-              <div className="empty-sb">Try a different filter or search</div>
-              {activeFilter && (
-                <button className="btn bgh bsm" style={{ marginTop: '12px' }} onClick={() => setActiveFilter('')}>
-                  Clear Filter
-                </button>
-              )}
+              <div className="empty-tx">No services found</div>
+              <div className="empty-sb">Try clearing filters or searching differently</div>
             </div>
           ) : (
-            <div className="mkt-grid">
-              {filteredServices.map(s => <ServiceCard key={s.id} s={s} />)}
-            </div>
+            <>
+              <div className="mkt-grid">
+                {sortedLive.map(s => <ServiceCard key={s.id} s={s} />)}
+              </div>
+
+              {/* LOAD MORE */}
+              {lsHasMore && !search && !stage1 && !stage2 && !stage3 && (
+                <div style={{ textAlign:'center', marginTop:'20px' }}>
+                  <button className="btn bgh bmd" onClick={() => {
+                    const next = lsPage + 1;
+                    setLsPage(next);
+                    loadLivePage(next);
+                  }} disabled={lsLoading}>
+                    {lsLoading ? '⏳ Loading...' : '▼ Load More Services'}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
 
-      {!loading && services.length === 0 && (
-        <div className="empty">
-          <span className="empty-ic">🛍</span>
-          <div className="empty-tx">No services available yet</div>
-          <div className="empty-sb">Admin is adding services soon</div>
-        </div>
-      )}
-
-      {/* ─── ORDER MODAL ────────────────────────────────────────────── */}
+      {/* ─── ORDER MODAL ─── */}
       {selected && (
         <div className="mlay" onClick={() => setSelected(null)}>
           <div className="mbox" onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <span style={{ fontSize: '28px' }}>{ic(selected.platform)}</span>
+            <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'16px' }}>
+              <span style={{ fontSize:'28px' }}>{ic(selected.platform)}</span>
               <div>
-                <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text)' }}>{selected.name}</div>
-                <div style={{ fontSize: '10px', color: cl(selected.platform), textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <div style={{ fontWeight:800, fontSize:'15px', color:'var(--text)' }}>{selected.name}</div>
+                <div style={{ fontSize:'10px', color:cl(selected.platform), textTransform:'uppercase', letterSpacing:'1px' }}>
                   {selected.platform}
                 </div>
               </div>
               <button onClick={() => setSelected(null)}
-                style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '22px' }}>×</button>
+                style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'22px' }}>×</button>
             </div>
 
-            {/* Refill info in modal */}
-            {(selected.has_refill === true || selected.has_refill === 'true') ? (
-              <div style={{ fontSize: '11px', color: 'var(--green)', marginBottom: '10px',
-                padding: '6px 12px', borderRadius: '6px', background: 'rgba(0,255,136,.06)',
-                border: '1px solid rgba(0,255,136,.2)' }}>
-                🔄 This service includes a {selected.refill_days || 30}-day refill guarantee
-              </div>
-            ) : (
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '10px',
-                padding: '6px 12px', borderRadius: '6px', background: 'rgba(255,51,85,.04)',
-                border: '1px solid rgba(255,51,85,.15)' }}>
-                🚫 No refill on this service
-              </div>
-            )}
-
             {ordered ? (
-              <div style={{ textAlign: 'center', padding: '30px 0' }}>
-                <div style={{ fontSize: '40px', marginBottom: '12px' }}>✅</div>
-                <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: '15px', marginBottom: '6px' }}>Order Placed!</div>
-                <div style={{ color: 'var(--text3)', fontSize: '12px' }}>Processing automatically...</div>
+              <div style={{ textAlign:'center', padding:'30px 0' }}>
+                <div style={{ fontSize:'40px', marginBottom:'12px' }}>✅</div>
+                <div style={{ color:'var(--green)', fontWeight:700, fontSize:'15px', marginBottom:'6px' }}>Order Placed!</div>
+                <div style={{ color:'var(--text3)', fontSize:'12px' }}>Processing automatically...</div>
               </div>
             ) : (
               <>
@@ -522,19 +427,19 @@ export default function Marketplace({ user, onNav }) {
                   <input className="inp" value={link} onChange={e => setLink(e.target.value)} placeholder="https://..." />
                 </div>
                 <div className="fi">
-                  <label className="fl">Quantity ({(selected.min_qty || 0).toLocaleString()} – {(selected.max_qty || 0).toLocaleString()})</label>
+                  <label className="fl">Quantity ({(selected.min_qty||0).toLocaleString()} – {(selected.max_qty||0).toLocaleString()})</label>
                   <input className="inp" type="number" value={qty}
                     onChange={e => setQty(e.target.value)}
                     min={selected.min_qty} max={selected.max_qty} />
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '10px 13px', borderRadius: '8px', background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text2)' }}>Total Cost</span>
-                  <span style={{ fontFamily: 'var(--fm)', fontSize: '18px', fontWeight: 700, color: 'var(--gold)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', padding:'10px 13px', borderRadius:'8px', background:'rgba(0,0,0,.3)', border:'1px solid var(--br)' }}>
+                  <span style={{ fontSize:'11px', color:'var(--text2)' }}>Total Cost</span>
+                  <span style={{ fontFamily:'var(--fm)', fontSize:'18px', fontWeight:700, color:'var(--gold)' }}>
                     {format(parseFloat(cost))}
                   </span>
                 </div>
                 {orderError && (
-                  <div style={{ background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)', borderRadius: '7px', padding: '10px', color: '#ff6b6b', fontSize: '12px', marginBottom: '12px' }}>
+                  <div style={{ background:'rgba(255,50,80,.08)', border:'1px solid rgba(255,50,80,.2)', borderRadius:'7px', padding:'10px', color:'#ff6b6b', fontSize:'12px', marginBottom:'12px' }}>
                     {orderError}
                   </div>
                 )}
