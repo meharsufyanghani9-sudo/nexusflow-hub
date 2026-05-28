@@ -29,6 +29,7 @@ export default function Marketplace({ user, onNav }) {
   const [lsServices, setLsServices]     = useState([]);
 
   const sentinelRef = useRef(null); // for infinite scroll
+  const searchTimeout = useRef(null);
 
   // ─── Filter state ─────────────────────────────────────────
   const [adminFilters, setAdminFilters] = useState([]);   // from service_filters table
@@ -129,7 +130,7 @@ export default function Marketplace({ user, onNav }) {
       const ids = filterServiceIds(stage3);
       if (ids && !ids.has(String(s.id))) return false;
     }
-    if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
+    // search is handled server-side — skip local filter
     return true;
   });
 
@@ -374,7 +375,33 @@ export default function Marketplace({ user, onNav }) {
           <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
             <input className="srch-inp" style={{ flex:1, minWidth:'140px' }}
               placeholder="🔍 Search services..."
-              value={search} onChange={e => setSearch(e.target.value)} />
+              value={search} onChange={e => {
+                const val = e.target.value;
+                setSearch(val);
+                // debounce: search all services server-side after 400ms
+                clearTimeout(searchTimeout.current);
+                if (val.trim()) {
+                  searchTimeout.current = setTimeout(async () => {
+                    setLsLoading(true);
+                    const { data } = await supabase
+                      .from('services').select('*')
+                      .eq('is_active', true)
+                      .ilike('name', `%${val.trim()}%`)
+                      .order('name')
+                      .limit(100);
+                    if (data) {
+                      setLsServices(data);
+                      setLsHasMore(false); // disable infinite scroll during search
+                    }
+                    setLsLoading(false);
+                  }, 400);
+                } else {
+                  // cleared search — reload normal paginated list
+                  setLsPage(1);
+                  setLsHasMore(true);
+                  loadLivePage(1, true);
+                }
+              }} />
             <select className="sel" style={{ minWidth:'140px', flexShrink:0 }}
               value={priceSort} onChange={e => setPriceSort(e.target.value)}>
               <option value="">💰 Price: Default</option>
