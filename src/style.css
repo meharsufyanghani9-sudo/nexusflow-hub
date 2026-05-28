@@ -693,4 +693,6 @@ body.light .mkt-featured{
   border-color:rgba(200,140,0,.35)!important;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
+.srch-inp {
+  font-size: 16px !important;
+}
