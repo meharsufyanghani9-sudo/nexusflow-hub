@@ -303,7 +303,7 @@ export default function Marketplace({ user, onNav }) {
               <div className="empty-sb">Admin hasn't featured any services</div>
             </div>
           ) : (
-            <div className="mkt-grid" style={{ gridTemplateColumns:'repeat(2,1fr)' }}>
+            <div className="mkt-grid-2col">
               {allServices.map(s => <ServiceCard key={s.id} s={s} />)}
             </div>
           )}
