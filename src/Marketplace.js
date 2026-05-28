@@ -184,26 +184,33 @@ export default function Marketplace({ user, onNav }) {
       description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // Auto-send to provider API
-    // Use provider_service_id first, fall back to provider_id
+    // Auto-send to provider API via Supabase Edge Function (handles CORS)
     const providerServiceId = selected.provider_service_id || selected.provider_id;
     if (selected.provider_api_url && selected.provider_api_key && providerServiceId) {
       try {
-        // Call provider API directly via our /api/proxy endpoint
-        const res = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: selected.provider_api_url,
-            key: selected.provider_api_key,
-            action: 'add',
-            service: providerServiceId,
-            link,
-            quantity: q,
-          }),
-        });
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+
+        const res = await fetch(
+          `https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/place-order`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              provider_url: selected.provider_api_url,
+              provider_key: selected.provider_api_key,
+              service_id: providerServiceId,
+              link,
+              quantity: q,
+              order_ref: orderRef,
+            }),
+          }
+        );
         const providerData = await res.json();
-        console.log('Provider response:', providerData); // for debugging
+        console.log('Provider response:', providerData);
         if (providerData?.order) {
           await supabase.from('orders').update({
             vendor_order_id: String(providerData.order),
@@ -213,10 +220,6 @@ export default function Marketplace({ user, onNav }) {
           await supabase.from('orders').update({
             provider_note: `Provider error: ${providerData.error}`,
             status: 'pending',
-          }).eq('order_ref', orderRef);
-        } else {
-          await supabase.from('orders').update({
-            provider_note: `Provider response: ${JSON.stringify(providerData)}`,
           }).eq('order_ref', orderRef);
         }
       } catch (e) {
