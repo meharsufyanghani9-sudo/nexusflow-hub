@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-const PROXY = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
 
 export default function AdminOrders() {
@@ -11,25 +10,46 @@ export default function AdminOrders() {
   const [search, setSearch] = useState('');
   const [msg, setMsg] = useState('');
   const [updating, setUpdating] = useState(null);
-  const [retrying, setRetrying] = useState(null);
   const [page, setPage] = useState(1);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
   const PER_PAGE = 30;
 
   useEffect(() => { loadOrders(); }, []);
 
   const loadOrders = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*, users(full_name, email)')
-      .order('created_at', { ascending: false });
-    if (data) setOrders(data);
-    if (error) console.error('AdminOrders load error:', error.message);
+    // Fetch orders (loop past 1000 limit)
+    let allOrders = [];
+    let from = 0;
+    const BATCH = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + BATCH - 1);
+      if (error || !data || data.length === 0) break;
+      allOrders = [...allOrders, ...data];
+      if (data.length < BATCH) break;
+      from += BATCH;
+    }
+    // Enrich with user info separately (avoids FK join issues)
+    if (allOrders.length > 0) {
+      const userIds = [...new Set(allOrders.map(o => o.user_id).filter(Boolean))];
+      const { data: users } = await supabase
+        .from('users').select('id,full_name,email').in('id', userIds);
+      const userMap = {};
+      (users || []).forEach(u => { userMap[u.id] = u; });
+      allOrders = allOrders.map(o => ({ ...o, users: userMap[o.user_id] || null }));
+    }
+    setOrders(allOrders);
     setLoading(false);
   };
 
   const updateStatus = async (orderId, newStatus) => {
     setUpdating(orderId);
+    // FIX: removed updated_at — that column does not exist in the orders table
     const { error } = await supabase
       .from('orders')
       .update({ status: newStatus })
@@ -67,115 +87,25 @@ export default function AdminOrders() {
     setUpdating(null);
   };
 
-  // ─── Admin: Force retry auto-placement on provider ────────────────────────
-  const forceRetryProvider = async (order) => {
-    if (retrying) return;
-    setRetrying(order.id);
-
-    const { data: service } = await supabase
-      .from('services')
-      .select('provider_api_url, provider_api_key, provider_service_id')
-      .eq('id', order.service_id)
-      .single();
-
-    if (!service || !service.provider_api_url) {
-      setMsg('❌ Service has no provider configured.');
-      setRetrying(null);
-      setTimeout(() => setMsg(''), 4000);
-      return;
-    }
-
+  const syncOrders = async () => {
+    setSyncing(true);
+    setSyncMsg('');
     try {
-      const res = await fetch(PROXY, {
+      const res = await fetch('https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/sync-orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
         },
-        body: JSON.stringify({
-          url: service.provider_api_url,
-          key: service.provider_api_key,
-          action: 'add',
-          service: service.provider_service_id,
-          link: order.link,
-          quantity: order.quantity,
-        }),
-      });
-      const providerData = await res.json();
-      if (providerData && providerData.order) {
-        await supabase.from('orders').update({
-          vendor_order_id: String(providerData.order),
-          status: 'in_progress',
-          provider_note: null,
-        }).eq('id', order.id);
-        setMsg(`✅ Order NF-${order.order_ref} sent to provider! Vendor ID: ${providerData.order}`);
-      } else {
-        const errMsg = providerData?.error || JSON.stringify(providerData);
-        await supabase.from('orders').update({
-          provider_note: `Admin retry failed: ${errMsg}`,
-        }).eq('id', order.id);
-        setMsg('❌ Provider rejected: ' + errMsg);
-      }
-    } catch (e) {
-      setMsg('❌ Connection error: ' + e.message);
-    }
-
-    setRetrying(null);
-    loadOrders();
-    setTimeout(() => setMsg(''), 6000);
-  };
-
-  // ─── Check status from provider ──────────────────────────────────────────
-  const checkProviderStatus = async (order) => {
-    if (!order.vendor_order_id) {
-      setMsg('❌ No vendor order ID found.');
-      setTimeout(() => setMsg(''), 3000);
-      return;
-    }
-
-    const { data: service } = await supabase
-      .from('services')
-      .select('provider_api_url, provider_api_key')
-      .eq('id', order.service_id)
-      .single();
-
-    if (!service) { setMsg('❌ Service not found.'); return; }
-
-    try {
-      const res = await fetch(PROXY, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
-        },
-        body: JSON.stringify({
-          url: service.provider_api_url,
-          key: service.provider_api_key,
-          action: 'status',
-          order: order.vendor_order_id,
-        }),
       });
       const data = await res.json();
-      if (data.status) {
-        // Map provider status to our status
-        let newStatus = order.status;
-        const pStatus = (data.status || '').toLowerCase();
-        if (pStatus === 'completed') newStatus = 'completed';
-        else if (pStatus === 'in progress' || pStatus === 'processing') newStatus = 'in_progress';
-        else if (pStatus === 'cancelled' || pStatus === 'canceled') newStatus = 'cancelled';
-
-        if (newStatus !== order.status) {
-          await supabase.from('orders').update({ status: newStatus }).eq('id', order.id);
-        }
-        setMsg(`📊 Provider status: ${data.status}${data.remains ? ' | Remaining: ' + data.remains : ''}${data.start_count ? ' | Start: ' + data.start_count : ''}`);
-      } else {
-        setMsg('⚠️ Provider response: ' + JSON.stringify(data));
-      }
+      setSyncMsg(data.message || 'Sync complete');
+      loadOrders();
     } catch (e) {
-      setMsg('❌ Error checking status: ' + e.message);
+      setSyncMsg('Sync failed: ' + e.message);
     }
-    loadOrders();
-    setTimeout(() => setMsg(''), 8000);
+    setSyncing(false);
+    setTimeout(() => setSyncMsg(''), 5000);
   };
 
   const filtered = orders.filter(o => {
@@ -198,30 +128,34 @@ export default function AdminOrders() {
     inProgress: orders.filter(o => o.status === 'in_progress').length,
     completed: orders.filter(o => o.status === 'completed').length,
     revenue: orders.reduce((a, b) => a + parseFloat(b.cost || 0), 0),
-    // How many pending have no vendor ID (stuck)
-    stuck: orders.filter(o => o.status === 'pending' && o.provider_note).length,
   };
 
   return (
     <div>
+      {syncMsg && (
+        <div style={{
+          background:'rgba(0,212,255,.08)', border:'1px solid rgba(0,212,255,.2)',
+          borderRadius:'8px', padding:'10px', textAlign:'center',
+          color:'var(--neon)', fontWeight:700, marginBottom:'12px', fontSize:'12px'
+        }}>🔁 {syncMsg}</div>
+      )}
       {msg && (
         <div style={{
-          background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : msg.startsWith('⚠️') || msg.startsWith('📊') ? 'rgba(255,184,0,.08)' : 'rgba(255,50,80,.08)',
+          background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : 'rgba(255,50,80,.08)',
           border: `1px solid ${msg.startsWith('✅') ? 'rgba(0,255,136,.2)' : 'rgba(255,50,80,.2)'}`,
           borderRadius: '8px', padding: '12px', textAlign: 'center',
-          color: msg.startsWith('✅') ? 'var(--green)' : msg.startsWith('⚠️') || msg.startsWith('📊') ? 'var(--gold)' : '#ff6b6b',
+          color: msg.startsWith('✅') ? 'var(--green)' : '#ff6b6b',
           fontWeight: 700, marginBottom: '16px', fontSize: '13px'
         }}>{msg}</div>
       )}
 
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '📦', lb: 'Total Orders',  vl: stats.total,                      cl: 'cn'  },
-          { ic: '⏳', lb: 'Pending',        vl: stats.pending,                    cl: 'cw'  },
-          { ic: '⚡', lb: 'In Progress',    vl: stats.inProgress,                 cl: 'cn'  },
-          { ic: '✅', lb: 'Completed',      vl: stats.completed,                  cl: 'cg'  },
-          { ic: '💰', lb: 'Revenue',        vl: `$${stats.revenue.toFixed(2)}`,   cl: 'cgo' },
-          { ic: '🔴', lb: 'Stuck Orders',   vl: stats.stuck,                      cl: stats.stuck > 0 ? 'cred' : 'cg' },
+          { ic: '📦', lb: 'Total Orders', vl: stats.total,                       cl: 'cn'  },
+          { ic: '⏳', lb: 'Pending',      vl: stats.pending,                      cl: 'cw'  },
+          { ic: '⚡', lb: 'In Progress',  vl: stats.inProgress,                   cl: 'cn'  },
+          { ic: '✅', lb: 'Completed',    vl: stats.completed,                     cl: 'cg'  },
+          { ic: '💰', lb: 'Revenue',      vl: `$${stats.revenue.toFixed(2)}`,      cl: 'cgo' },
         ].map((s, i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -231,22 +165,15 @@ export default function AdminOrders() {
         ))}
       </div>
 
-      {/* Show warning if stuck orders exist */}
-      {stats.stuck > 0 && (
-        <div style={{
-          background: 'rgba(255,184,0,.08)', border: '1px solid rgba(255,184,0,.25)',
-          borderRadius: '8px', padding: '12px', marginBottom: '16px',
-          fontSize: '12px', color: 'var(--gold)', lineHeight: 1.7
-        }}>
-          ⚠️ <strong>{stats.stuck} pending orders</strong> failed to auto-place on provider. Filter by "Pending" and click <strong>🔄 Send</strong> to retry them manually.
-        </div>
-      )}
-
       <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
         <input className="srch-inp" style={{ flex: 1, minWidth: '160px' }}
           placeholder="🔍 Search by order ID, service, user, link..."
           value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
         <button className="btn bgh bsm" onClick={loadOrders}>🔄 Refresh</button>
+        <button className="btn bsm" onClick={syncOrders} disabled={syncing}
+          style={{ background: syncing ? 'rgba(0,212,255,.1)' : 'rgba(0,212,255,.15)', border:'1px solid rgba(0,212,255,.3)', color:'var(--neon)' }}>
+          {syncing ? '⏳ Syncing...' : '🔁 Sync API'}
+        </button>
       </div>
 
       <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -290,18 +217,10 @@ export default function AdminOrders() {
                     <td colSpan="9" style={{ textAlign: 'center', padding: '32px', color: 'var(--text3)' }}>No orders found</td>
                   </tr>
                 ) : paginated.map(o => (
-                  <tr key={o.id} style={{ background: o.provider_note && o.status === 'pending' ? 'rgba(255,184,0,.04)' : 'transparent' }}>
+                  <tr key={o.id}>
                     <td style={{ fontFamily: 'var(--fm)', color: 'var(--neon)', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.order_ref || o.id}
-                      {o.vendor_order_id && (
-                        <div style={{ fontSize: '9px', color: 'var(--text3)' }}>V: {o.vendor_order_id}</div>
-                      )}
-                      {o.provider_note && o.status === 'pending' && (
-                        <div style={{ fontSize: '9px', color: '#ff9800', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                          title={o.provider_note}>
-                          ⚠️ Failed
-                        </div>
-                      )}
+                      {o.provider_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.provider_order_id}</div>}
                     </td>
                     <td style={{ fontSize: '11px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.users?.full_name || '—'}</div>
@@ -341,32 +260,6 @@ export default function AdminOrders() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                        {/* Send to provider (for stuck pending orders) */}
-                        {o.status === 'pending' && !o.vendor_order_id && (
-                          <button
-                            onClick={() => forceRetryProvider(o)}
-                            disabled={retrying === o.id || updating === o.id}
-                            style={{
-                              padding: '4px 8px', borderRadius: '6px', cursor: 'pointer',
-                              border: '1px solid rgba(0,212,255,.3)', background: 'rgba(0,212,255,.1)',
-                              color: 'var(--neon)', fontSize: '10px', whiteSpace: 'nowrap'
-                            }}>
-                            {retrying === o.id ? '⏳' : '🔄 Send'}
-                          </button>
-                        )}
-                        {/* Check status from provider */}
-                        {o.vendor_order_id && o.status === 'in_progress' && (
-                          <button
-                            onClick={() => checkProviderStatus(o)}
-                            disabled={updating === o.id}
-                            style={{
-                              padding: '4px 8px', borderRadius: '6px', cursor: 'pointer',
-                              border: '1px solid rgba(123,47,255,.3)', background: 'rgba(123,47,255,.1)',
-                              color: '#7b2fff', fontSize: '10px', whiteSpace: 'nowrap'
-                            }}>
-                            📊 Status
-                          </button>
-                        )}
                         {o.status !== 'cancelled' && o.status !== 'completed' && (
                           <button onClick={() => refundOrder(o)} disabled={updating === o.id}
                             style={{
