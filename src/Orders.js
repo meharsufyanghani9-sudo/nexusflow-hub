@@ -214,7 +214,8 @@ export default function Orders({ user }) {
                     )}
                   </td>
                   <td style={{ color:'var(--text3)', fontSize:'10px', whiteSpace:'nowrap' }}>
-                    {new Date(o.created_at).toLocaleDateString()}
+                    <div>{new Date(o.created_at).toLocaleDateString()}</div>
+                    <div style={{ color:'var(--text3)', fontSize:'9px' }}>{new Date(o.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
                   </td>
                   <td>
                     <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
