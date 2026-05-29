@@ -7,33 +7,32 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import CurrencySwitcher from './CurrencySwitcher';
 
-// ─── LAZY LOAD all heavy pages ─────────────────────────────
-const BuyerDashboard   = lazy(() => import('./BuyerDashboard'));
-const Marketplace      = lazy(() => import('./Marketplace'));
-const Deposit          = lazy(() => import('./Deposit'));
-const Orders           = lazy(() => import('./Orders'));
-const Transactions     = lazy(() => import('./Transactions'));
-const Profile          = lazy(() => import('./Profile'));
-const Referral         = lazy(() => import('./Referral'));
-const Tasks            = lazy(() => import('./Tasks'));
-const PanelApi         = lazy(() => import('./PanelApi'));
-const SupportTicket    = lazy(() => import('./SupportTicket'));
-const AdminDashboard   = lazy(() => import('./AdminDashboard'));
-const AdminDeposits    = lazy(() => import('./AdminDeposits'));
-const AdminUsers       = lazy(() => import('./AdminUsers'));
-const AdminSettings    = lazy(() => import('./AdminSettings'));
-const AdminDisputes    = lazy(() => import('./AdminDisputes'));
-const AdminApiImport   = lazy(() => import('./AdminApiImport'));
-const AdminWithdrawals = lazy(() => import('./AdminWithdrawals'));
-const AdminResellers   = lazy(() => import('./AdminResellers'));
-const AdminTasks       = lazy(() => import('./AdminTasks'));
-const AdminReferral    = lazy(() => import('./AdminReferral'));
-const AdminSupport     = lazy(() => import('./AdminSupport'));
-const AdminCurrencies  = lazy(() => import('./AdminCurrencies'));
-const AdminMassEmail   = lazy(() => import('./AdminMassEmail'));
-const AdminOrders      = lazy(() => import('./AdminOrders'));
-const AdminServices    = lazy(() => import('./AdminServices'));
-const AdminFilters     = lazy(() => import('./AdminFilters'));
+// ─── Lazy load all heavy pages ────────────────────────────
+const BuyerDashboard    = lazy(() => import('./BuyerDashboard'));
+const Marketplace       = lazy(() => import('./Marketplace'));
+const Deposit           = lazy(() => import('./Deposit'));
+const Orders            = lazy(() => import('./Orders'));
+const Transactions      = lazy(() => import('./Transactions'));
+const Profile           = lazy(() => import('./Profile'));
+const Referral          = lazy(() => import('./Referral'));
+const Tasks             = lazy(() => import('./Tasks'));
+const PanelApi          = lazy(() => import('./PanelApi'));
+const SupportTicket     = lazy(() => import('./SupportTicket'));
+const AdminDashboard    = lazy(() => import('./AdminDashboard'));
+const AdminDeposits     = lazy(() => import('./AdminDeposits'));
+const AdminUsers        = lazy(() => import('./AdminUsers'));
+const AdminSettings     = lazy(() => import('./AdminSettings'));
+const AdminDisputes     = lazy(() => import('./AdminDisputes'));
+const AdminApiImport    = lazy(() => import('./AdminApiImport'));
+const AdminWithdrawals  = lazy(() => import('./AdminWithdrawals'));
+const AdminResellers    = lazy(() => import('./AdminResellers'));
+const AdminTasks        = lazy(() => import('./AdminTasks'));
+const AdminReferral     = lazy(() => import('./AdminReferral'));
+const AdminSupport      = lazy(() => import('./AdminSupport'));
+const AdminCurrencies   = lazy(() => import('./AdminCurrencies'));
+const AdminMassEmail    = lazy(() => import('./AdminMassEmail'));
+const AdminOrders       = lazy(() => import('./AdminOrders'));
+const AdminServices     = lazy(() => import('./AdminServices'));
 const ResellerDashboard = lazy(() => import('./ResellerDashboard'));
 const ResellerServices  = lazy(() => import('./ResellerServices'));
 const ResellerEarnings  = lazy(() => import('./ResellerEarnings'));
@@ -52,7 +51,6 @@ const pageTitles = {
   support: 'Support Tickets', currencies: 'Currency Rates',
   massemail: 'Mass Email', buyersupport: 'Support',
   adminorders: 'Manage Orders', adminservices: 'Manage Services',
-  adminfilters: 'Manage Filters',
 };
 
 const buyerNav = [
@@ -108,42 +106,35 @@ export default function App() {
   const [showCurrency, setShowCurrency] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
 
-  // ─── HISTORY API: push state on every page navigation ────
+  // ─── History API: back button navigates within app ───────
   const navigateTo = (newPage) => {
     window.history.pushState({ page: newPage }, '', '#' + newPage);
     setPage(newPage);
   };
 
   useEffect(() => {
-    // Handle back/forward button
     const handlePopState = (e) => {
       if (e.state && e.state.page) {
         setPage(e.state.page);
       } else {
-        // No more history — go to dashboard instead of exiting
         setPage('dashboard');
         window.history.replaceState({ page: 'dashboard' }, '', '#dashboard');
       }
     };
     window.addEventListener('popstate', handlePopState);
-
-    // Seed initial history entry so first back goes to dashboard not exit
     if (!window.history.state) {
       window.history.replaceState({ page: 'dashboard' }, '', '#dashboard');
     }
-
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   useEffect(() => {
     supabase.from('settings').select('key').limit(1);
-
     const restoreSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const { data: profile } = await supabase
           .from('users').select('*').eq('id', session.user.id).maybeSingle();
-
         if (profile && profile.is_active !== false) {
           let username = profile.username;
           if (!username) {
@@ -166,7 +157,6 @@ export default function App() {
       setScreen('landing');
     };
     restoreSession();
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') { setUser(null); setScreen('landing'); setPage('dashboard'); }
       if (event === 'PASSWORD_RECOVERY') { setScreen('auth'); setAuthTab('login'); }
@@ -180,7 +170,7 @@ export default function App() {
   };
 
   const handleAuth = (tab) => { setAuthTab(tab); setScreen('auth'); };
-  const handleLogin = (u) => { setUser(u); setPage('dashboard'); setScreen('app'); };
+  const handleLogin = (u) => { setUser(u); navigateTo('dashboard'); setScreen('app'); };
 
   const toggleTheme = () => {
     const next = !darkMode;
@@ -220,23 +210,22 @@ export default function App() {
       if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
     }
     if (user.role === 'admin') {
-      if (page === 'dashboard')    return <AdminDashboard user={user} onNav={navigateTo} />;
-      if (page === 'adminorders')  return <AdminOrders />;
+      if (page === 'dashboard')     return <AdminDashboard user={user} onNav={navigateTo} />;
+      if (page === 'adminorders')   return <AdminOrders />;
       if (page === 'adminservices') return <AdminServices />;
-      if (page === 'adminfilters') return <AdminFilters />;
-      if (page === 'deposits')     return <AdminDeposits />;
-      if (page === 'users')        return <AdminUsers />;
-      if (page === 'settings')     return <AdminSettings />;
-      if (page === 'disputes')     return <AdminDisputes />;
-      if (page === 'api')          return <AdminApiImport />;
-      if (page === 'withdrawals')  return <AdminWithdrawals />;
-      if (page === 'resellers')    return <AdminResellers />;
-      if (page === 'admintasks')   return <AdminTasks />;
+      if (page === 'deposits')      return <AdminDeposits />;
+      if (page === 'users')         return <AdminUsers />;
+      if (page === 'settings')      return <AdminSettings />;
+      if (page === 'disputes')      return <AdminDisputes />;
+      if (page === 'api')           return <AdminApiImport />;
+      if (page === 'withdrawals')   return <AdminWithdrawals />;
+      if (page === 'resellers')     return <AdminResellers />;
+      if (page === 'admintasks')    return <AdminTasks />;
       if (page === 'adminreferral') return <AdminReferral />;
-      if (page === 'support')      return <AdminSupport />;
-      if (page === 'currencies')   return <AdminCurrencies />;
-      if (page === 'massemail')    return <AdminMassEmail />;
-      if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
+      if (page === 'support')       return <AdminSupport />;
+      if (page === 'currencies')    return <AdminCurrencies />;
+      if (page === 'massemail')     return <AdminMassEmail />;
+      if (page === 'profile')       return <Profile user={user} onLogout={logout} />;
     }
     if (user.role === 'reseller') {
       if (page === 'dashboard')    return <ResellerDashboard user={user} onNav={navigateTo} />;
