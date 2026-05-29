@@ -151,6 +151,7 @@ export default function Marketplace({ user, onNav }) {
       service_id: selected.id, service_name: selected.name,
       platform: selected.platform, link, quantity: q, cost: totalCost,
       status: 'pending', progress: 0,
+      has_refill: selected.has_refill || false,
     });
     if (orderErr) { setOrderError('Order failed: ' + orderErr.message); setOrdering(false); return; }
 
