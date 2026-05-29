@@ -29,14 +29,14 @@ function CountdownTimer({ targetTime, label }) {
 }
 
 export default function Orders({ user }) {
-  const [filter, setFilter] = useState('all');
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [filter, setFilter]     = useState('all');
+  const [orders, setOrders]     = useState([]);
+  const [loading, setLoading]   = useState(true);
   const [actionMsg, setActionMsg] = useState('');
 
   useEffect(() => { loadOrders(); }, []);
 
-  // Auto-refresh every 30s when there are active orders
+  // Auto-refresh every 30s when active orders exist
   useEffect(() => {
     const id = setInterval(() => {
       const hasActive = orders.some(o => o.status === 'pending' || o.status === 'in_progress');
@@ -48,8 +48,7 @@ export default function Orders({ user }) {
   const loadOrders = async () => {
     setLoading(true);
     const { data } = await supabase
-      .from('orders')
-      .select('*')
+      .from('orders').select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
     if (data) setOrders(data);
@@ -67,28 +66,22 @@ export default function Orders({ user }) {
 
   const canCancel = (order) => {
     if (order.status !== 'pending') return false;
-    const created = new Date(order.created_at);
-    const diff = new Date() - created;
-    return diff < 15 * 60 * 1000; // 15 minutes window
+    const diff = new Date() - new Date(order.created_at);
+    return diff < 15 * 60 * 1000;
   };
 
   const canRefill = (order) => {
-    // Only completed orders can request refill
     if (order.status !== 'completed') return false;
-    // Only if service supports refill (has_refill flag)
     if (!order.has_refill) return false;
-    // Already requested
     if (order.refill_requested) return false;
     return true;
   };
 
   const cancelOrder = async (order) => {
     if (!window.confirm('Cancel this order? Your balance will be refunded.')) return;
-    // Refund user balance
     const { data: profile } = await supabase.from('users').select('balance').eq('id', user.id).single();
     const newBalance = parseFloat(profile.balance) + parseFloat(order.cost || 0);
     await supabase.from('users').update({ balance: newBalance }).eq('id', user.id);
-    // Cancel the order
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id);
     setActionMsg('✅ Order cancelled. Your balance has been refunded!');
     loadOrders();
@@ -108,6 +101,7 @@ export default function Orders({ user }) {
     completed: orders.filter(o => o.status === 'completed').length,
     progress: orders.filter(o => o.status === 'in_progress').length,
     pending: orders.filter(o => o.status === 'pending').length,
+    spent: orders.reduce((a, b) => a + parseFloat(b.cost || 0), 0),
   };
 
   return (
@@ -117,9 +111,7 @@ export default function Orders({ user }) {
           background:'rgba(0,255,136,.08)', border:'1px solid rgba(0,255,136,.2)',
           borderRadius:'8px', padding:'12px', textAlign:'center', color:'var(--green)',
           fontWeight:700, marginBottom:'16px', fontSize:'13px'
-        }}>
-          {actionMsg}
-        </div>
+        }}>{actionMsg}</div>
       )}
 
       {/* Filter Tabs */}
@@ -142,10 +134,11 @@ export default function Orders({ user }) {
       {/* Stats Row */}
       <div className="cgrid" style={{ marginBottom:'16px' }}>
         {[
-          { ic:'📦', lb:'Total', vl: stats.total, cl:'cn' },
-          { ic:'✅', lb:'Completed', vl: stats.completed, cl:'cg' },
-          { ic:'⚡', lb:'In Progress', vl: stats.progress, cl:'cn' },
-          { ic:'⏳', lb:'Pending', vl: stats.pending, cl:'cw' },
+          { ic:'📦', lb:'Total',       vl: stats.total,                          cl:'cn' },
+          { ic:'✅', lb:'Completed',   vl: stats.completed,                       cl:'cg' },
+          { ic:'⚡', lb:'In Progress', vl: stats.progress,                        cl:'cn' },
+          { ic:'⏳', lb:'Pending',     vl: stats.pending,                         cl:'cw' },
+          { ic:'💰', lb:'Total Spent', vl: `$${stats.spent.toFixed(2)}`,           cl:'cgo' },
         ].map((s,i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -167,6 +160,8 @@ export default function Orders({ user }) {
                 <th>Service</th>
                 <th>Qty</th>
                 <th>Cost</th>
+                <th>Start</th>
+                <th>Remains</th>
                 <th>Status</th>
                 <th>Date</th>
                 <th>Action</th>
@@ -175,21 +170,37 @@ export default function Orders({ user }) {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan="7" style={{ textAlign:'center', padding:'32px', color:'var(--text3)' }}>
+                  <td colSpan="9" style={{ textAlign:'center', padding:'32px', color:'var(--text3)' }}>
                     No orders found
                   </td>
                 </tr>
               ) : filtered.map(o => (
                 <tr key={o.id}>
-                  <td style={{ fontFamily:'var(--fm)', color:'var(--neon)', fontSize:'11px' }}>
+                  <td style={{ fontFamily:'var(--fm)', color:'var(--neon)', fontSize:'11px', whiteSpace:'nowrap' }}>
                     {o.order_ref || o.id?.slice(0,8)}
+                    {o.vendor_order_id && (
+                      <div style={{ fontSize:'9px', color:'var(--text3)', marginTop:'2px' }}>
+                        Vendor: {o.vendor_order_id}
+                      </div>
+                    )}
                   </td>
-                  <td style={{ fontWeight:600, maxWidth:'120px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  <td style={{ fontWeight:600, maxWidth:'120px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'12px' }}>
                     {o.service_name}
                   </td>
-                  <td style={{ fontFamily:'var(--fm)' }}>{o.quantity?.toLocaleString()}</td>
-                  <td style={{ color:'var(--gold)', fontFamily:'var(--fm)' }}>
+                  <td style={{ fontFamily:'var(--fm)', fontSize:'11px' }}>
+                    {o.quantity?.toLocaleString()}
+                  </td>
+                  <td style={{ color:'var(--gold)', fontFamily:'var(--fm)', fontSize:'11px' }}>
                     ${parseFloat(o.cost||0).toFixed(2)}
+                  </td>
+                  {/* START COUNT */}
+                  <td style={{ fontFamily:'var(--fm)', fontSize:'11px', color:'var(--text2)', textAlign:'center' }}>
+                    {o.start_count != null ? o.start_count.toLocaleString() : '—'}
+                  </td>
+                  {/* REMAINS */}
+                  <td style={{ fontFamily:'var(--fm)', fontSize:'11px', textAlign:'center',
+                    color: o.remains === 0 ? 'var(--green)' : 'var(--text2)' }}>
+                    {o.remains != null ? o.remains.toLocaleString() : '—'}
                   </td>
                   <td>
                     <span className={`bdg ${badgeClass(o.status)}`}>
@@ -201,13 +212,8 @@ export default function Orders({ user }) {
                         label="Cancel in"
                       />
                     )}
-                    {o.vendor_order_id && (
-                      <div style={{ fontSize:'9px', color:'var(--text3)', marginTop:'2px' }}>
-                        Vendor: {o.vendor_order_id}
-                      </div>
-                    )}
                   </td>
-                  <td style={{ color:'var(--text3)', fontSize:'10px' }}>
+                  <td style={{ color:'var(--text3)', fontSize:'10px', whiteSpace:'nowrap' }}>
                     {new Date(o.created_at).toLocaleDateString()}
                   </td>
                   <td>
@@ -231,7 +237,7 @@ export default function Orders({ user }) {
                             background:'rgba(0,255,136,.1)', color:'var(--green)',
                             cursor:'pointer', fontSize:'11px', whiteSpace:'nowrap'
                           }}>
-                          Refill
+                          🔁 Refill
                         </button>
                       )}
                       {o.refill_requested && (
