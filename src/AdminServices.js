@@ -40,7 +40,7 @@ export default function AdminServices() {
 
   const loadServices = async () => {
     setLoading(true);
-    // Supabase max is 1000 per query — loop to fetch ALL services
+    // Loop past Supabase 1000-row limit to load all 2500+ services
     let allData = [];
     let from = 0;
     const BATCH = 1000;
