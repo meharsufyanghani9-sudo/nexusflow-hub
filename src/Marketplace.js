@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
-// Platform definitions with real brand colors and emoji icons
 const PLATFORMS = [
-  { id: 'all',       label: 'Everything', icon: '🌐',  color: '#888' },
+  { id: 'all',       label: 'Everything', icon: '🌐',  color: '#00d4ff' },
   { id: 'instagram', label: 'Instagram',  icon: '📸',  color: '#E1306C' },
   { id: 'facebook',  label: 'Facebook',   icon: '👍',  color: '#1877F2' },
   { id: 'youtube',   label: 'YouTube',    icon: '▶️',  color: '#FF0000' },
@@ -18,12 +17,11 @@ const PLATFORMS = [
   { id: 'website',   label: 'Website',    icon: '🌐',  color: '#7b2fff' },
   { id: 'discord',   label: 'Discord',    icon: '🎮',  color: '#5865F2' },
   { id: 'snapchat',  label: 'Snapchat',   icon: '👻',  color: '#FFFC00' },
-  { id: 'threads',   label: 'Threads',    icon: '🧵',  color: '#000' },
+  { id: 'threads',   label: 'Threads',    icon: '🧵',  color: '#aaa' },
   { id: 'twitch',    label: 'Twitch',     icon: '🟣',  color: '#9146FF' },
-  { id: 'capcut',    label: 'CapCut',     icon: '🎬',  color: '#000' },
+  { id: 'capcut',    label: 'CapCut',     icon: '🎬',  color: '#aaa' },
   { id: 'custom',    label: 'Other',      icon: '⚙️',  color: '#888' },
 ];
-
 const platformMap = {};
 PLATFORMS.forEach(p => { platformMap[p.id] = p; });
 
@@ -43,10 +41,15 @@ export default function Marketplace({ user, onNav }) {
   const [lsHasMore, setLsHasMore]   = useState(true);
   const [lsTotal, setLsTotal]       = useState(0);
 
-  // UI
-  const [tab, setTab]           = useState('featured');
-  const [search, setSearch]     = useState('');
-  const [platform, setPlatform] = useState('all');
+  // All services for category/service dropdowns
+  const [allForDropdown, setAllForDropdown] = useState([]);
+
+  // Filters
+  const [tab, setTab]             = useState('featured');
+  const [platform, setPlatform]   = useState('all');
+  const [search, setSearch]       = useState('');
+  const [category, setCategory]   = useState('');
+  const [serviceFilter, setServiceFilter] = useState('');
   const [priceSort, setPriceSort] = useState('');
 
   // Order modal
@@ -68,8 +71,29 @@ export default function Marketplace({ user, onNav }) {
       .then(({ data }) => { if (data) setFeaturedServices(data); setFeaturedLoading(false); });
   }, []);
 
+  // ─── Load all service names for category/service dropdowns ─
+  useEffect(() => {
+    supabase.from('services').select('id,name,category,platform')
+      .eq('is_active', true).order('name')
+      .then(({ data }) => { if (data) setAllForDropdown(data); });
+  }, []);
+
+  // ─── Derived: unique categories for selected platform ─────
+  const categories = [...new Set(
+    allForDropdown
+      .filter(s => platform === 'all' || s.platform === platform)
+      .map(s => s.category)
+      .filter(Boolean)
+  )].sort();
+
+  // ─── Derived: services for selected category ──────────────
+  const categoryServices = allForDropdown.filter(s =>
+    (platform === 'all' || s.platform === platform) &&
+    (!category || s.category === category)
+  );
+
   // ─── Load live page ───────────────────────────────────────
-  const loadLivePage = useCallback(async (pageNum, reset = false, filterPlatform = 'all') => {
+  const loadLivePage = useCallback(async (pageNum, reset = false, pf = 'all', cat = '', svcId = '') => {
     setLsLoading(true);
     const from = (pageNum - 1) * PAGE_SIZE;
     const to   = from + PAGE_SIZE - 1;
@@ -77,9 +101,9 @@ export default function Marketplace({ user, onNav }) {
       .eq('is_active', true)
       .order('created_at', { ascending: false })
       .range(from, to);
-    if (filterPlatform && filterPlatform !== 'all') {
-      query = query.eq('platform', filterPlatform);
-    }
+    if (pf && pf !== 'all') query = query.eq('platform', pf);
+    if (cat) query = query.eq('category', cat);
+    if (svcId) query = query.eq('id', svcId);
     const { data, count } = await query;
     if (data) {
       setLsServices(prev => reset ? data : [...prev, ...data]);
@@ -89,36 +113,51 @@ export default function Marketplace({ user, onNav }) {
     setLsLoading(false);
   }, []);
 
-  // ─── Infinite scroll observer ─────────────────────────────
+  // ─── Infinite scroll ──────────────────────────────────────
   useEffect(() => {
     if (!sentinelRef.current) return;
     const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && lsHasMore && !lsLoading && !search) {
+      if (entries[0].isIntersecting && lsHasMore && !lsLoading && !search && !serviceFilter) {
         const next = lsPage + 1;
         setLsPage(next);
-        loadLivePage(next, false, platform);
+        loadLivePage(next, false, platform, category, serviceFilter);
       }
     }, { threshold: 0.1 });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [lsHasMore, lsLoading, lsPage, loadLivePage, search, platform]);
+  }, [lsHasMore, lsLoading, lsPage, loadLivePage, search, platform, category, serviceFilter]);
 
-  const handleTabSwitch = (t) => {
-    setTab(t);
-    if (t === 'live' && lsServices.length === 0) loadLivePage(1, true, platform);
+  const switchToLive = (pf = platform, cat = category, svc = serviceFilter) => {
+    setTab('live');
+    setLsPage(1); setLsHasMore(true);
+    loadLivePage(1, true, pf, cat, svc);
   };
 
-  // ─── Platform filter ──────────────────────────────────────
+  // ─── Platform click ───────────────────────────────────────
   const handlePlatform = (p) => {
     setPlatform(p);
+    setCategory('');
+    setServiceFilter('');
     setSearch('');
-    setLsPage(1);
-    setLsHasMore(true);
-    loadLivePage(1, true, p);
-    if (tab !== 'live') setTab('live');
+    switchToLive(p, '', '');
   };
 
-  // ─── Server-side search ───────────────────────────────────
+  // ─── Category change ──────────────────────────────────────
+  const handleCategory = (cat) => {
+    setCategory(cat);
+    setServiceFilter('');
+    setSearch('');
+    switchToLive(platform, cat, '');
+  };
+
+  // ─── Service dropdown change ──────────────────────────────
+  const handleServiceFilter = (svcId) => {
+    setServiceFilter(svcId);
+    setSearch('');
+    switchToLive(platform, category, svcId);
+  };
+
+  // ─── Search ───────────────────────────────────────────────
   const handleSearch = (val) => {
     setSearch(val);
     clearTimeout(searchTimeout.current);
@@ -130,13 +169,14 @@ export default function Marketplace({ user, onNav }) {
           .ilike('name', `%${val.trim()}%`)
           .order('name').limit(100);
         if (platform !== 'all') query = query.eq('platform', platform);
+        if (category) query = query.eq('category', category);
         const { data } = await query;
         if (data) { setLsServices(data); setLsHasMore(false); }
         setLsLoading(false);
       }, 400);
     } else {
       setLsPage(1); setLsHasMore(true);
-      loadLivePage(1, true, platform);
+      loadLivePage(1, true, platform, category, serviceFilter);
     }
   };
 
@@ -183,7 +223,7 @@ export default function Marketplace({ user, onNav }) {
       description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // ─── Auto-send to provider via Vercel /api/proxy ──────
+    // Auto-send to provider
     const providerServiceId = selected.provider_service_id || selected.provider_id;
     if (selected.provider_api_url && selected.provider_api_key && providerServiceId) {
       try {
@@ -195,12 +235,10 @@ export default function Marketplace({ user, onNav }) {
             key: selected.provider_api_key,
             action: 'add',
             service: String(providerServiceId),
-            link,
-            quantity: String(q),
+            link, quantity: String(q),
           }),
         });
         const providerData = await res.json();
-        console.log('Provider response:', providerData);
         if (providerData?.order) {
           await supabase.from('orders').update({
             vendor_order_id: String(providerData.order),
@@ -227,20 +265,19 @@ export default function Marketplace({ user, onNav }) {
     setTimeout(() => { setSelected(null); setOrdered(false); setLink(''); setQty(''); }, 2500);
   };
 
-  const getPlatform = (id) => platformMap[id] || platformMap['custom'];
-  const ic = (id) => getPlatform(id).icon;
-  const cl = (id) => getPlatform(id).color;
+  const getPf = (id) => platformMap[id] || platformMap['custom'];
+  const ic = (id) => getPf(id).icon;
+  const cl = (id) => getPf(id).color;
 
   const ServiceCard = ({ s }) => (
-    <div
-      className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
+    <div className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
       onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
       {s.is_featured && (
         <div style={{
-          position: 'absolute', top: '-1px', right: '10px',
-          background: 'linear-gradient(135deg,var(--gold2),var(--gold))',
-          color: '#000', fontSize: '8px', fontWeight: 800, padding: '3px 8px',
-          borderRadius: '0 0 6px 6px', letterSpacing: '1px', fontFamily: 'var(--fd)'
+          position:'absolute', top:'-1px', right:'10px',
+          background:'linear-gradient(135deg,var(--gold2),var(--gold))',
+          color:'#000', fontSize:'8px', fontWeight:800, padding:'3px 8px',
+          borderRadius:'0 0 6px 6px', letterSpacing:'1px', fontFamily:'var(--fd)'
         }}>⭐ FEATURED</div>
       )}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px' }}>
@@ -271,40 +308,13 @@ export default function Marketplace({ user, onNav }) {
 
   return (
     <div>
-      {/* ─── PLATFORM GRID (like officialclicks) ─── */}
-      <div style={{ marginBottom:'16px' }}>
-        <div style={{
-          display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px',
-        }}>
-          {PLATFORMS.map(p => (
-            <button key={p.id} onClick={() => handlePlatform(p.id)}
-              style={{
-                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                padding:'10px 4px', borderRadius:'12px', cursor:'pointer', transition:'.15s',
-                border: platform === p.id ? `2px solid ${p.color === '#888' ? 'var(--neon)' : p.color}` : '1px solid var(--br)',
-                background: platform === p.id ? `${p.color === '#888' ? 'var(--neon)' : p.color}18` : 'var(--gl)',
-                gap:'4px',
-              }}>
-              <span style={{ fontSize:'20px', lineHeight:1 }}>{p.icon}</span>
-              <span style={{
-                fontSize:'9px', fontWeight:700, color: platform === p.id ? (p.color === '#888' ? 'var(--neon)' : p.color) : 'var(--text3)',
-                letterSpacing:'0.3px', textAlign:'center', lineHeight:1.2,
-                border: platform === p.id ? `1px solid ${p.color === '#888' ? 'var(--neon)' : p.color}` : '1px solid var(--br)',
-                padding:'2px 5px', borderRadius:'20px',
-                background: platform === p.id ? `${p.color === '#888' ? 'var(--neon)' : p.color}20` : 'transparent',
-              }}>{p.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* ─── TAB SWITCHER ─── */}
       <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
         <button onClick={() => setTab('featured')}
           className={tab === 'featured' ? 'btn bp bmd' : 'btn bgh bmd'} style={{ flex:1 }}>
           ⭐ Featured
         </button>
-        <button onClick={() => handleTabSwitch('live')}
+        <button onClick={() => { if (tab !== 'live') switchToLive(); else setTab('live'); }}
           className={tab === 'live' ? 'btn bp bmd' : 'btn bgh bmd'} style={{ flex:1 }}>
           🛒 Live Services {lsTotal > 0 ? `(${lsTotal.toLocaleString()})` : ''}
         </button>
@@ -319,7 +329,6 @@ export default function Marketplace({ user, onNav }) {
             <div className="empty">
               <span className="empty-ic">⭐</span>
               <div className="empty-tx">No featured services yet</div>
-              <div className="empty-sb">Admin hasn't featured any services</div>
             </div>
           ) : (
             <div className="mkt-grid-2col">
@@ -332,13 +341,70 @@ export default function Marketplace({ user, onNav }) {
       {/* ─── LIVE SERVICES TAB ─── */}
       {tab === 'live' && (
         <>
+          {/* STAGE 1: Platform grid */}
+          <div style={{ marginBottom:'16px' }}>
+            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
+              SELECT PLATFORM
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'6px' }}>
+              {PLATFORMS.map(p => (
+                <button key={p.id} onClick={() => handlePlatform(p.id)} style={{
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                  padding:'8px 4px', borderRadius:'10px', cursor:'pointer', transition:'.15s', gap:'4px',
+                  border: platform === p.id ? `2px solid ${p.color}` : '1px solid var(--br)',
+                  background: platform === p.id ? `${p.color}18` : 'var(--gl)',
+                }}>
+                  <span style={{ fontSize:'18px', lineHeight:1 }}>{p.icon}</span>
+                  <span style={{
+                    fontSize:'8px', fontWeight:700, color: platform === p.id ? p.color : 'var(--text3)',
+                    letterSpacing:'0.3px', textAlign:'center', lineHeight:1.2,
+                    border: `1px solid ${platform === p.id ? p.color : 'var(--br)'}`,
+                    padding:'1px 4px', borderRadius:'20px',
+                    background: platform === p.id ? `${p.color}20` : 'transparent',
+                  }}>{p.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* STAGE 2: Category dropdown */}
+          {categories.length > 0 && (
+            <div style={{ marginBottom:'10px' }}>
+              <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
+                CATEGORY
+              </div>
+              <select className="sel" style={{ width:'100%', fontSize:'14px' }}
+                value={category} onChange={e => handleCategory(e.target.value)}>
+                <option value="">✦ All Categories</option>
+                {categories.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* STAGE 3: Service dropdown */}
+          {category && categoryServices.length > 0 && (
+            <div style={{ marginBottom:'10px' }}>
+              <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
+                SERVICE
+              </div>
+              <select className="sel" style={{ width:'100%', fontSize:'14px' }}
+                value={serviceFilter} onChange={e => handleServiceFilter(e.target.value)}>
+                <option value="">✦ All Services in Category</option>
+                {categoryServices.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Search + price sort */}
           <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
-            <input
-              className="srch-inp" style={{ flex:1, minWidth:'140px', fontSize:'16px' }}
+            <input className="srch-inp" style={{ flex:1, minWidth:'140px', fontSize:'16px' }}
               placeholder="🔍 Search services..."
               value={search} onChange={e => handleSearch(e.target.value)} />
-            <select className="sel" style={{ minWidth:'130px', flexShrink:0, fontSize:'16px' }}
+            <select className="sel" style={{ minWidth:'130px', flexShrink:0, fontSize:'14px' }}
               value={priceSort} onChange={e => setPriceSort(e.target.value)}>
               <option value="">💰 Price: Default</option>
               <option value="asc">💰 Low → High</option>
@@ -346,13 +412,14 @@ export default function Marketplace({ user, onNav }) {
             </select>
           </div>
 
+          {/* Service grid */}
           {lsLoading && lsServices.length === 0 ? (
             <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>⏳ Loading services...</div>
           ) : sortedLive.length === 0 && !lsLoading ? (
             <div className="empty">
               <span className="empty-ic">🔍</span>
               <div className="empty-tx">No services found</div>
-              <div className="empty-sb">Try a different search or platform</div>
+              <div className="empty-sb">Try a different platform or category</div>
             </div>
           ) : (
             <>
@@ -375,14 +442,14 @@ export default function Marketplace({ user, onNav }) {
           <div className="mbox" onClick={e => e.stopPropagation()}>
             <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'16px' }}>
               <span style={{ fontSize:'28px' }}>{ic(selected.platform)}</span>
-              <div>
+              <div style={{ flex:1 }}>
                 <div style={{ fontWeight:800, fontSize:'15px', color:'var(--text)' }}>{selected.name}</div>
                 <div style={{ fontSize:'10px', color:cl(selected.platform), textTransform:'uppercase', letterSpacing:'1px' }}>
                   {selected.platform}
                 </div>
               </div>
               <button onClick={() => setSelected(null)}
-                style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'22px' }}>×</button>
+                style={{ background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'22px' }}>×</button>
             </div>
             {ordered ? (
               <div style={{ textAlign:'center', padding:'30px 0' }}>
