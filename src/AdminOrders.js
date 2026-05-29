@@ -17,24 +17,30 @@ export default function AdminOrders() {
 
   const loadOrders = async () => {
     setLoading(true);
-
-    // Try with users join first
-    let { data, error } = await supabase
-      .from('orders')
-      .select('*, users(full_name, email)')
-      .order('created_at', { ascending: false });
-
-    // If join fails (no FK relationship), fall back to orders only
-    if (error || !data) {
-      const fallback = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
-      data = fallback.data;
+    // Batch loop past Supabase 1000-row limit
+    let allOrders = [];
+    let from = 0;
+    const BATCH = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('orders').select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + BATCH - 1);
+      if (error || !data || data.length === 0) break;
+      allOrders = [...allOrders, ...data];
+      if (data.length < BATCH) break;
+      from += BATCH;
     }
-
-    if (data) setOrders(data);
-    else setMsg('❌ Failed to load orders. Check Supabase logs.');
+    // Enrich with user info (avoids FK join issues)
+    if (allOrders.length > 0) {
+      const userIds = [...new Set(allOrders.map(o => o.user_id).filter(Boolean))];
+      const { data: users } = await supabase
+        .from('users').select('id,full_name,email').in('id', userIds);
+      const userMap = {};
+      (users || []).forEach(u => { userMap[u.id] = u; });
+      allOrders = allOrders.map(o => ({ ...o, users: userMap[o.user_id] || null }));
+    }
+    setOrders(allOrders);
     setLoading(false);
   };
 
@@ -179,8 +185,7 @@ export default function AdminOrders() {
                   <tr key={o.id}>
                     <td style={{ fontFamily: 'var(--fm)', color: 'var(--neon)', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.order_ref || o.id}
-                      {o.vendor_order_id && <div style={{ fontSize: '9px', color: 'var(--green)' }}>✅ P#{o.vendor_order_id}</div>}
-                      {o.provider_note && <div style={{ fontSize: '9px', color: '#ff6b6b', maxWidth: '160px', whiteSpace: 'normal', lineHeight: 1.3, marginTop: '2px' }}>⚠️ {o.provider_note}</div>}
+                      {o.provider_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.provider_order_id}</div>}
                     </td>
                     <td style={{ fontSize: '11px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.users?.full_name || '—'}</div>
