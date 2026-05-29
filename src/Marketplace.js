@@ -13,24 +13,14 @@ const platformColors = {
   snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff'
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// IMPORTANT: Paste your real Supabase anon key below.
-// Find it at: Supabase Dashboard → Project Settings → API → anon / public
-// It must have 3 parts separated by dots: eyJ....eyJ....SIGNATURE
-// The current value below is INCOMPLETE (missing the signature at the end).
-// ─────────────────────────────────────────────────────────────────────────────
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0YmZvdnRxandyeGJlcGNjdGh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNzU2ODcsImV4cCI6MjA5NDg1MTY4N30.QG_ZcMpAlrYDgaRR7OjkOqW69m2ASUMi14QBMEVi2oY';
-const PROXY_URL = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
-
+// ─── Send order to provider via Supabase Edge Function proxy ────────────────
+// Always uses the proxy — direct browser calls are blocked by CORS.
 async function sendToProvider(providerUrl, providerKey, serviceId, link, quantity) {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token || SUPABASE_ANON_KEY;
-
-  const proxyRes = await fetch(PROXY_URL, {
+  const res = await fetch('https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
+      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0YmZvdnRxandyeGJlcGNjdGh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNzU2ODcsImV4cCI6MjA5NDg1MTY4N30.QG_ZcMpAlrYDgaRR7OjkOqW69m2ASUMi14QBMEVi2oY',
     },
     body: JSON.stringify({
       url: providerUrl,
@@ -41,8 +31,7 @@ async function sendToProvider(providerUrl, providerKey, serviceId, link, quantit
       quantity,
     }),
   });
-
-  const text = await proxyRes.text();
+  const text = await res.text();
   try { return JSON.parse(text); } catch { return { raw: text }; }
 }
 
@@ -118,7 +107,7 @@ export default function Marketplace({ user, onNav }) {
       description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // ─── Send to provider API via Supabase Edge Function proxy ───
+    // ─── Send to provider API ───────────────────────────────────────────────
     if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
       try {
         const providerData = await sendToProvider(
@@ -151,7 +140,7 @@ export default function Marketplace({ user, onNav }) {
       }
     } else {
       await supabase.from('orders').update({
-        provider_note: 'No provider configured for this service',
+        provider_note: 'No provider configured',
         status: 'pending',
       }).eq('order_ref', orderRef);
     }
