@@ -17,11 +17,24 @@ export default function AdminOrders() {
 
   const loadOrders = async () => {
     setLoading(true);
-    const { data } = await supabase
+
+    // Try with users join first
+    let { data, error } = await supabase
       .from('orders')
       .select('*, users(full_name, email)')
       .order('created_at', { ascending: false });
+
+    // If join fails (no FK relationship), fall back to orders only
+    if (error || !data) {
+      const fallback = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+      data = fallback.data;
+    }
+
     if (data) setOrders(data);
+    else setMsg('❌ Failed to load orders. Check Supabase logs.');
     setLoading(false);
   };
 
