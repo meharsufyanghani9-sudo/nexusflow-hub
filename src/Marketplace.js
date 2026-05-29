@@ -2,16 +2,30 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
-const platformIcons = {
-  instagram: '📸', tiktok: '🎵', youtube: '▶️', twitter: '🐦',
-  facebook: '👤', telegram: '✈️', snapchat: '👻', linkedin: '💼',
-  spotify: '🎵', discord: '🎮', twitch: '🎮', custom: '⚙️'
-};
-const platformColors = {
-  instagram: '#E1306C', tiktok: '#00d4ff', youtube: '#FF0000',
-  twitter: '#1DA1F2', facebook: '#1877F2', telegram: '#0088cc',
-  snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff'
-};
+// Platform definitions with real brand colors and emoji icons
+const PLATFORMS = [
+  { id: 'all',       label: 'Everything', icon: '🌐',  color: '#888' },
+  { id: 'instagram', label: 'Instagram',  icon: '📸',  color: '#E1306C' },
+  { id: 'facebook',  label: 'Facebook',   icon: '👍',  color: '#1877F2' },
+  { id: 'youtube',   label: 'YouTube',    icon: '▶️',  color: '#FF0000' },
+  { id: 'twitter',   label: 'Twitter',    icon: '🐦',  color: '#1DA1F2' },
+  { id: 'spotify',   label: 'Spotify',    icon: '🎵',  color: '#1DB954' },
+  { id: 'tiktok',    label: 'TikTok',     icon: '🎵',  color: '#00d4ff' },
+  { id: 'linkedin',  label: 'LinkedIn',   icon: '💼',  color: '#0077B5' },
+  { id: 'google',    label: 'Google',     icon: '🔍',  color: '#4285F4' },
+  { id: 'whatsapp',  label: 'WhatsApp',   icon: '💬',  color: '#25D366' },
+  { id: 'telegram',  label: 'Telegram',   icon: '✈️',  color: '#0088cc' },
+  { id: 'website',   label: 'Website',    icon: '🌐',  color: '#7b2fff' },
+  { id: 'discord',   label: 'Discord',    icon: '🎮',  color: '#5865F2' },
+  { id: 'snapchat',  label: 'Snapchat',   icon: '👻',  color: '#FFFC00' },
+  { id: 'threads',   label: 'Threads',    icon: '🧵',  color: '#000' },
+  { id: 'twitch',    label: 'Twitch',     icon: '🟣',  color: '#9146FF' },
+  { id: 'capcut',    label: 'CapCut',     icon: '🎬',  color: '#000' },
+  { id: 'custom',    label: 'Other',      icon: '⚙️',  color: '#888' },
+];
+
+const platformMap = {};
+PLATFORMS.forEach(p => { platformMap[p.id] = p; });
 
 const PAGE_SIZE = 15;
 
@@ -23,27 +37,27 @@ export default function Marketplace({ user, onNav }) {
   const [featuredLoading, setFeaturedLoading]   = useState(true);
 
   // Live / paginated
-  const [lsServices, setLsServices]   = useState([]);
-  const [lsPage, setLsPage]           = useState(1);
-  const [lsLoading, setLsLoading]     = useState(false);
-  const [lsHasMore, setLsHasMore]     = useState(true);
-  const [lsTotal, setLsTotal]         = useState(0);
+  const [lsServices, setLsServices] = useState([]);
+  const [lsPage, setLsPage]         = useState(1);
+  const [lsLoading, setLsLoading]   = useState(false);
+  const [lsHasMore, setLsHasMore]   = useState(true);
+  const [lsTotal, setLsTotal]       = useState(0);
 
   // UI
-  const [tab, setTab]         = useState('featured');
-  const [search, setSearch]   = useState('');
-  const [platform, setPlatform] = useState('');
+  const [tab, setTab]           = useState('featured');
+  const [search, setSearch]     = useState('');
+  const [platform, setPlatform] = useState('all');
   const [priceSort, setPriceSort] = useState('');
 
   // Order modal
-  const [selected, setSelected]   = useState(null);
-  const [link, setLink]           = useState('');
-  const [qty, setQty]             = useState('');
-  const [ordering, setOrdering]   = useState(false);
-  const [ordered, setOrdered]     = useState(false);
+  const [selected, setSelected]     = useState(null);
+  const [link, setLink]             = useState('');
+  const [qty, setQty]               = useState('');
+  const [ordering, setOrdering]     = useState(false);
+  const [ordered, setOrdered]       = useState(false);
   const [orderError, setOrderError] = useState('');
 
-  const sentinelRef  = useRef(null);
+  const sentinelRef   = useRef(null);
   const searchTimeout = useRef(null);
 
   // ─── Load featured ────────────────────────────────────────
@@ -55,15 +69,18 @@ export default function Marketplace({ user, onNav }) {
   }, []);
 
   // ─── Load live page ───────────────────────────────────────
-  const loadLivePage = useCallback(async (pageNum, reset = false) => {
+  const loadLivePage = useCallback(async (pageNum, reset = false, filterPlatform = 'all') => {
     setLsLoading(true);
     const from = (pageNum - 1) * PAGE_SIZE;
     const to   = from + PAGE_SIZE - 1;
-    const { data, count } = await supabase
-      .from('services').select('*', { count: 'exact' })
+    let query = supabase.from('services').select('*', { count: 'exact' })
       .eq('is_active', true)
       .order('created_at', { ascending: false })
       .range(from, to);
+    if (filterPlatform && filterPlatform !== 'all') {
+      query = query.eq('platform', filterPlatform);
+    }
+    const { data, count } = await query;
     if (data) {
       setLsServices(prev => reset ? data : [...prev, ...data]);
       setLsHasMore(data.length === PAGE_SIZE);
@@ -79,16 +96,26 @@ export default function Marketplace({ user, onNav }) {
       if (entries[0].isIntersecting && lsHasMore && !lsLoading && !search) {
         const next = lsPage + 1;
         setLsPage(next);
-        loadLivePage(next);
+        loadLivePage(next, false, platform);
       }
     }, { threshold: 0.1 });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [lsHasMore, lsLoading, lsPage, loadLivePage, search]);
+  }, [lsHasMore, lsLoading, lsPage, loadLivePage, search, platform]);
 
   const handleTabSwitch = (t) => {
     setTab(t);
-    if (t === 'live' && lsServices.length === 0) loadLivePage(1, true);
+    if (t === 'live' && lsServices.length === 0) loadLivePage(1, true, platform);
+  };
+
+  // ─── Platform filter ──────────────────────────────────────
+  const handlePlatform = (p) => {
+    setPlatform(p);
+    setSearch('');
+    setLsPage(1);
+    setLsHasMore(true);
+    loadLivePage(1, true, p);
+    if (tab !== 'live') setTab('live');
   };
 
   // ─── Server-side search ───────────────────────────────────
@@ -98,40 +125,35 @@ export default function Marketplace({ user, onNav }) {
     if (val.trim()) {
       searchTimeout.current = setTimeout(async () => {
         setLsLoading(true);
-        const { data } = await supabase
-          .from('services').select('*')
+        let query = supabase.from('services').select('*')
           .eq('is_active', true)
           .ilike('name', `%${val.trim()}%`)
           .order('name').limit(100);
+        if (platform !== 'all') query = query.eq('platform', platform);
+        const { data } = await query;
         if (data) { setLsServices(data); setLsHasMore(false); }
         setLsLoading(false);
       }, 400);
     } else {
       setLsPage(1); setLsHasMore(true);
-      loadLivePage(1, true);
+      loadLivePage(1, true, platform);
     }
   };
 
-  // ─── Filtered + sorted live list ─────────────────────────
-  const filteredLive = lsServices.filter(s => {
-    if (platform && s.platform !== platform) return false;
-    return true;
-  });
+  // ─── Price sort ───────────────────────────────────────────
   const sortedLive = priceSort
-    ? [...filteredLive].sort((a, b) =>
+    ? [...lsServices].sort((a, b) =>
         priceSort === 'asc'
           ? parseFloat(a.price_per_1k) - parseFloat(b.price_per_1k)
           : parseFloat(b.price_per_1k) - parseFloat(a.price_per_1k))
-    : filteredLive;
+    : lsServices;
 
-  const availablePlatforms = [...new Set(lsServices.map(s => s.platform))].filter(Boolean);
-
-  // ─── Cost ────────────────────────────────────────────────
+  // ─── Cost ─────────────────────────────────────────────────
   const cost = selected && qty
     ? (parseFloat(qty) / 1000 * parseFloat(selected.price_per_1k)).toFixed(4)
     : '0.00';
 
-  // ─── Place order ─────────────────────────────────────────
+  // ─── Place order ──────────────────────────────────────────
   const placeOrder = async () => {
     setOrderError('');
     if (!link) { setOrderError('Enter your link'); return; }
@@ -161,7 +183,7 @@ export default function Marketplace({ user, onNav }) {
       description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // ─── Auto-send to provider via Vercel /api/proxy ─────
+    // ─── Auto-send to provider via Vercel /api/proxy ──────
     const providerServiceId = selected.provider_service_id || selected.provider_id;
     if (selected.provider_api_url && selected.provider_api_key && providerServiceId) {
       try {
@@ -205,8 +227,9 @@ export default function Marketplace({ user, onNav }) {
     setTimeout(() => { setSelected(null); setOrdered(false); setLink(''); setQty(''); }, 2500);
   };
 
-  const ic = (p) => platformIcons[p] || '⚙️';
-  const cl = (p) => platformColors[p] || '#7b2fff';
+  const getPlatform = (id) => platformMap[id] || platformMap['custom'];
+  const ic = (id) => getPlatform(id).icon;
+  const cl = (id) => getPlatform(id).color;
 
   const ServiceCard = ({ s }) => (
     <div
@@ -248,8 +271,35 @@ export default function Marketplace({ user, onNav }) {
 
   return (
     <div>
+      {/* ─── PLATFORM GRID (like officialclicks) ─── */}
+      <div style={{ marginBottom:'16px' }}>
+        <div style={{
+          display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px',
+        }}>
+          {PLATFORMS.map(p => (
+            <button key={p.id} onClick={() => handlePlatform(p.id)}
+              style={{
+                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                padding:'10px 4px', borderRadius:'12px', cursor:'pointer', transition:'.15s',
+                border: platform === p.id ? `2px solid ${p.color === '#888' ? 'var(--neon)' : p.color}` : '1px solid var(--br)',
+                background: platform === p.id ? `${p.color === '#888' ? 'var(--neon)' : p.color}18` : 'var(--gl)',
+                gap:'4px',
+              }}>
+              <span style={{ fontSize:'20px', lineHeight:1 }}>{p.icon}</span>
+              <span style={{
+                fontSize:'9px', fontWeight:700, color: platform === p.id ? (p.color === '#888' ? 'var(--neon)' : p.color) : 'var(--text3)',
+                letterSpacing:'0.3px', textAlign:'center', lineHeight:1.2,
+                border: platform === p.id ? `1px solid ${p.color === '#888' ? 'var(--neon)' : p.color}` : '1px solid var(--br)',
+                padding:'2px 5px', borderRadius:'20px',
+                background: platform === p.id ? `${p.color === '#888' ? 'var(--neon)' : p.color}20` : 'transparent',
+              }}>{p.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ─── TAB SWITCHER ─── */}
-      <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+      <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
         <button onClick={() => setTab('featured')}
           className={tab === 'featured' ? 'btn bp bmd' : 'btn bgh bmd'} style={{ flex:1 }}>
           ⭐ Featured
@@ -282,20 +332,13 @@ export default function Marketplace({ user, onNav }) {
       {/* ─── LIVE SERVICES TAB ─── */}
       {tab === 'live' && (
         <>
-          {/* Filters */}
+          {/* Search + price sort */}
           <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
             <input
               className="srch-inp" style={{ flex:1, minWidth:'140px', fontSize:'16px' }}
               placeholder="🔍 Search services..."
               value={search} onChange={e => handleSearch(e.target.value)} />
-            <select className="sel" style={{ minWidth:'130px', flexShrink:0 }}
-              value={platform} onChange={e => setPlatform(e.target.value)}>
-              <option value="">🌐 All Platforms</option>
-              {availablePlatforms.map(p => (
-                <option key={p} value={p}>{ic(p)} {p}</option>
-              ))}
-            </select>
-            <select className="sel" style={{ minWidth:'130px', flexShrink:0 }}
+            <select className="sel" style={{ minWidth:'130px', flexShrink:0, fontSize:'16px' }}
               value={priceSort} onChange={e => setPriceSort(e.target.value)}>
               <option value="">💰 Price: Default</option>
               <option value="asc">💰 Low → High</option>
@@ -303,21 +346,19 @@ export default function Marketplace({ user, onNav }) {
             </select>
           </div>
 
-          {/* Service grid */}
           {lsLoading && lsServices.length === 0 ? (
             <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>⏳ Loading services...</div>
           ) : sortedLive.length === 0 && !lsLoading ? (
             <div className="empty">
               <span className="empty-ic">🔍</span>
               <div className="empty-tx">No services found</div>
-              <div className="empty-sb">Try a different search or filter</div>
+              <div className="empty-sb">Try a different search or platform</div>
             </div>
           ) : (
             <>
               <div className="mkt-grid">
                 {sortedLive.map(s => <ServiceCard key={s.id} s={s} />)}
               </div>
-              {/* Infinite scroll sentinel */}
               <div ref={sentinelRef} style={{ height:'40px', display:'flex', alignItems:'center', justifyContent:'center' }}>
                 {lsLoading && lsServices.length > 0 && (
                   <div style={{ width:'20px', height:'20px', border:'2px solid var(--br)', borderTopColor:'var(--neon)', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />
@@ -353,7 +394,8 @@ export default function Marketplace({ user, onNav }) {
               <>
                 <div className="fi">
                   <label className="fl">Your Link / Username</label>
-                  <input className="inp" value={link} onChange={e => setLink(e.target.value)} placeholder="https://..." style={{ fontSize:'16px' }} />
+                  <input className="inp" value={link} onChange={e => setLink(e.target.value)}
+                    placeholder="https://..." style={{ fontSize:'16px' }} />
                 </div>
                 <div className="fi">
                   <label className="fl">Quantity ({(selected.min_qty||0).toLocaleString()} – {(selected.max_qty||0).toLocaleString()})</label>
