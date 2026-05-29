@@ -122,27 +122,25 @@ export default function Marketplace({ user, onNav }) {
             status: 'in_progress',
           }).eq('order_ref', orderRef);
         } else if (providerData && providerData.error) {
-          await supabase.from('orders').update({
-            provider_note: `Provider error: ${providerData.error}`,
-            status: 'pending',
-          }).eq('order_ref', orderRef);
+          const note = `Provider error: ${providerData.error}`;
+          await supabase.from('orders').update({ provider_note: note, status: 'pending' }).eq('order_ref', orderRef);
+          setOrderError(`⚠️ Order saved but provider rejected it: ${providerData.error}`);
         } else {
-          await supabase.from('orders').update({
-            provider_note: `Response: ${JSON.stringify(providerData)}`,
-            status: 'pending',
-          }).eq('order_ref', orderRef);
+          const note = `Unexpected response: ${JSON.stringify(providerData)}`;
+          await supabase.from('orders').update({ provider_note: note, status: 'pending' }).eq('order_ref', orderRef);
+          setOrderError(`⚠️ Order saved but got unexpected response: ${JSON.stringify(providerData)}`);
         }
       } catch (e) {
-        await supabase.from('orders').update({
-          provider_note: `Failed: ${e.message}`,
-          status: 'pending',
-        }).eq('order_ref', orderRef);
+        const note = `Failed: ${e.message}`;
+        await supabase.from('orders').update({ provider_note: note, status: 'pending' }).eq('order_ref', orderRef);
+        setOrderError(`⚠️ Order saved but provider call failed: ${e.message}`);
       }
     } else {
       await supabase.from('orders').update({
-        provider_note: 'No provider configured',
+        provider_note: 'No provider configured — check service settings in Admin',
         status: 'pending',
       }).eq('order_ref', orderRef);
+      setOrderError('⚠️ Order saved but no provider is configured for this service. Go to Admin → Services and fill in provider fields.');
     }
 
     setOrdering(false);
