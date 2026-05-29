@@ -73,10 +73,13 @@ export default function Orders({ user }) {
   };
 
   const canRefill = (order) => {
-    if (order.status !== 'in_progress') return false;
-    const created = new Date(order.created_at);
-    const diff = new Date() - created;
-    return diff < 24 * 60 * 60 * 1000; // 24 hours window
+    // Only completed orders can request refill
+    if (order.status !== 'completed') return false;
+    // Only if service supports refill (has_refill flag)
+    if (!order.has_refill) return false;
+    // Already requested
+    if (order.refill_requested) return false;
+    return true;
   };
 
   const cancelOrder = async (order) => {
@@ -220,7 +223,7 @@ export default function Orders({ user }) {
                           Cancel
                         </button>
                       )}
-                      {canRefill(o) && !o.refill_requested && (
+                      {canRefill(o) && (
                         <button onClick={() => refillOrder(o)}
                           style={{
                             padding:'4px 10px', borderRadius:'6px',
