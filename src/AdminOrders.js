@@ -11,39 +11,17 @@ export default function AdminOrders() {
   const [msg, setMsg] = useState('');
   const [updating, setUpdating] = useState(null);
   const [page, setPage] = useState(1);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState('');
   const PER_PAGE = 30;
 
   useEffect(() => { loadOrders(); }, []);
 
   const loadOrders = async () => {
     setLoading(true);
-    // Fetch orders (loop past 1000 limit)
-    let allOrders = [];
-    let from = 0;
-    const BATCH = 1000;
-    while (true) {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(from, from + BATCH - 1);
-      if (error || !data || data.length === 0) break;
-      allOrders = [...allOrders, ...data];
-      if (data.length < BATCH) break;
-      from += BATCH;
-    }
-    // Enrich with user info separately (avoids FK join issues)
-    if (allOrders.length > 0) {
-      const userIds = [...new Set(allOrders.map(o => o.user_id).filter(Boolean))];
-      const { data: users } = await supabase
-        .from('users').select('id,full_name,email').in('id', userIds);
-      const userMap = {};
-      (users || []).forEach(u => { userMap[u.id] = u; });
-      allOrders = allOrders.map(o => ({ ...o, users: userMap[o.user_id] || null }));
-    }
-    setOrders(allOrders);
+    const { data } = await supabase
+      .from('orders')
+      .select('*, users(full_name, email)')
+      .order('created_at', { ascending: false });
+    if (data) setOrders(data);
     setLoading(false);
   };
 
@@ -87,27 +65,6 @@ export default function AdminOrders() {
     setUpdating(null);
   };
 
-  const syncOrders = async () => {
-    setSyncing(true);
-    setSyncMsg('');
-    try {
-      const res = await fetch('https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/sync-orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
-        },
-      });
-      const data = await res.json();
-      setSyncMsg(data.message || 'Sync complete');
-      loadOrders();
-    } catch (e) {
-      setSyncMsg('Sync failed: ' + e.message);
-    }
-    setSyncing(false);
-    setTimeout(() => setSyncMsg(''), 5000);
-  };
-
   const filtered = orders.filter(o => {
     const matchStatus = filter === 'all' || o.status === filter;
     const matchSearch = !search ||
@@ -132,13 +89,6 @@ export default function AdminOrders() {
 
   return (
     <div>
-      {syncMsg && (
-        <div style={{
-          background:'rgba(0,212,255,.08)', border:'1px solid rgba(0,212,255,.2)',
-          borderRadius:'8px', padding:'10px', textAlign:'center',
-          color:'var(--neon)', fontWeight:700, marginBottom:'12px', fontSize:'12px'
-        }}>🔁 {syncMsg}</div>
-      )}
       {msg && (
         <div style={{
           background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : 'rgba(255,50,80,.08)',
@@ -170,10 +120,6 @@ export default function AdminOrders() {
           placeholder="🔍 Search by order ID, service, user, link..."
           value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
         <button className="btn bgh bsm" onClick={loadOrders}>🔄 Refresh</button>
-        <button className="btn bsm" onClick={syncOrders} disabled={syncing}
-          style={{ background: syncing ? 'rgba(0,212,255,.1)' : 'rgba(0,212,255,.15)', border:'1px solid rgba(0,212,255,.3)', color:'var(--neon)' }}>
-          {syncing ? '⏳ Syncing...' : '🔁 Sync API'}
-        </button>
       </div>
 
       <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -220,7 +166,8 @@ export default function AdminOrders() {
                   <tr key={o.id}>
                     <td style={{ fontFamily: 'var(--fm)', color: 'var(--neon)', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.order_ref || o.id}
-                      {o.provider_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.provider_order_id}</div>}
+                      {o.vendor_order_id && <div style={{ fontSize: '9px', color: 'var(--green)' }}>✅ P#{o.vendor_order_id}</div>}
+                      {o.provider_note && <div style={{ fontSize: '9px', color: '#ff6b6b', maxWidth: '160px', whiteSpace: 'normal', lineHeight: 1.3, marginTop: '2px' }}>⚠️ {o.provider_note}</div>}
                     </td>
                     <td style={{ fontSize: '11px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.users?.full_name || '—'}</div>
