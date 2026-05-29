@@ -36,7 +36,7 @@ export default function Orders({ user }) {
 
   useEffect(() => { loadOrders(); }, []);
 
-  // Auto-refresh orders every 30s if any are pending/in_progress
+  // Auto-refresh every 30s when there are active orders
   useEffect(() => {
     const id = setInterval(() => {
       const hasActive = orders.some(o => o.status === 'pending' || o.status === 'in_progress');
