@@ -13,6 +13,39 @@ const platformColors = {
   snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff'
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPORTANT: Paste your real Supabase anon key below.
+// Find it at: Supabase Dashboard → Project Settings → API → anon / public
+// It must have 3 parts separated by dots: eyJ....eyJ....SIGNATURE
+// The current value below is INCOMPLETE (missing the signature at the end).
+// ─────────────────────────────────────────────────────────────────────────────
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0YmZvdnRxandyeGJlcGNjdGh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNzU2ODcsImV4cCI6MjA5NDg1MTY4N30.QG_ZcMpAlrYDgaRR7OjkOqW69m2ASUMi14QBMEVi2oY';
+const PROXY_URL = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
+
+async function sendToProvider(providerUrl, providerKey, serviceId, link, quantity) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || SUPABASE_ANON_KEY;
+
+  const proxyRes = await fetch(PROXY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      url: providerUrl,
+      key: providerKey,
+      action: 'add',
+      service: String(serviceId),
+      link,
+      quantity,
+    }),
+  });
+
+  const text = await proxyRes.text();
+  try { return JSON.parse(text); } catch { return { raw: text }; }
+}
+
 export default function Marketplace({ user, onNav }) {
   const { format } = useCurrency();
   const [services, setServices] = useState([]);
@@ -85,23 +118,15 @@ export default function Marketplace({ user, onNav }) {
       description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // ─── FULLY AUTOMATIC: Send to provider API if configured ───
+    // ─── Send to provider API via Supabase Edge Function proxy ───
     if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
       try {
-        const res = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: selected.provider_api_url,
-            key: selected.provider_api_key,
-            action: 'add',
-            service: selected.provider_service_id,
-            link, quantity: q,
-          }),
-        });
-        const providerData = await res.json();
+        const providerData = await sendToProvider(
+          selected.provider_api_url,
+          selected.provider_api_key,
+          selected.provider_service_id,
+          link, q
+        );
         if (providerData && providerData.order) {
           await supabase.from('orders').update({
             vendor_order_id: String(providerData.order),
@@ -110,15 +135,18 @@ export default function Marketplace({ user, onNav }) {
         } else if (providerData && providerData.error) {
           await supabase.from('orders').update({
             provider_note: `Provider error: ${providerData.error}`,
+            status: 'pending',
           }).eq('order_ref', orderRef);
         } else {
           await supabase.from('orders').update({
-            provider_note: `Unexpected response: ${JSON.stringify(providerData)}`,
+            provider_note: `Response: ${JSON.stringify(providerData)}`,
+            status: 'pending',
           }).eq('order_ref', orderRef);
         }
       } catch (e) {
         await supabase.from('orders').update({
-          provider_note: `Auto-placement failed: ${e.message}`,
+          provider_note: `Failed: ${e.message}`,
+          status: 'pending',
         }).eq('order_ref', orderRef);
       }
     } else {
