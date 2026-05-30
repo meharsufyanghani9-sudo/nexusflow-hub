@@ -145,12 +145,41 @@ export default function Marketplace({ user, onNav }) {
     switchToLive(p, '', '');
   };
 
-  // ─── Category change ──────────────────────────────────────
+  // ─── Filter chip click — keyword search in service name ──
   const handleCategory = (cat) => {
     setCategory(cat);
     setServiceFilter('');
-    setSearch('');
-    switchToLive(platform, cat, '');
+    // Map chip id to search keyword
+    const keywords = {
+      'guaranteed': 'guaranteed',
+      'non-drop': 'non-drop',
+      'budget': 'budget',
+      'refill': 'refill',
+      'fast': 'fast',
+      'lifetime': 'lifetime',
+    };
+    const kw = keywords[cat] || '';
+    if (kw) {
+      setSearch(kw);
+      setLsLoading(true);
+      supabase.from('services').select('*')
+        .eq('is_active', true)
+        .ilike('name', `%${kw}%`)
+        .order('name').limit(200)
+        .then(({ data }) => {
+          let filtered = data || [];
+          if (platform !== 'all') filtered = filtered.filter(s => s.platform === platform);
+          setLsServices(filtered);
+          setLsHasMore(false);
+          setLsTotal(filtered.length);
+          setLsLoading(false);
+          setTab('live');
+        });
+    } else {
+      setSearch('');
+      setLsPage(1); setLsHasMore(true);
+      switchToLive(platform, '', '', priceSort);
+    }
   };
 
   // ─── Service dropdown change ──────────────────────────────
@@ -371,32 +400,34 @@ export default function Marketplace({ user, onNav }) {
             </div>
           </div>
 
-          {/* STAGE 2: Category dropdown - always show */}
-          <div style={{ marginBottom:'10px' }}>
-            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
-              CATEGORY
+          {/* STAGE 2: Quick filter chips */}
+          <div style={{ marginBottom:'12px' }}>
+            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
+              FILTER BY TYPE
             </div>
-            <select className="sel" style={{ width:'100%', fontSize:'14px' }}
-              value={category} onChange={e => handleCategory(e.target.value)}>
-              <option value="">✦ All Categories</option>
-              {categories.map(c => (
-                <option key={c} value={c}>{c}</option>
+            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+              {[
+                { id:'', label:'All', icon:'✦' },
+                { id:'guaranteed', label:'Guaranteed', icon:'✅' },
+                { id:'non-drop', label:'Non-Drop', icon:'💎' },
+                { id:'budget', label:'Budget', icon:'💰' },
+                { id:'refill', label:'With Refill', icon:'🔄' },
+                { id:'fast', label:'Fast Delivery', icon:'⚡' },
+                { id:'lifetime', label:'Lifetime', icon:'♾️' },
+              ].map(f => (
+                <button key={f.id} onClick={() => handleCategory(f.id)}
+                  style={{
+                    padding:'6px 12px', borderRadius:'20px', cursor:'pointer',
+                    fontSize:'11px', fontWeight:700, whiteSpace:'nowrap',
+                    transition:'.15s',
+                    background: category === f.id ? 'var(--neon)' : 'var(--gl)',
+                    color: category === f.id ? '#000' : 'var(--text2)',
+                    border: category === f.id ? 'none' : '1px solid var(--br)',
+                  }}>
+                  {f.icon} {f.label}
+                </button>
               ))}
-            </select>
-          </div>
-
-          {/* STAGE 3: Service dropdown - show when category selected */}
-          <div style={{ marginBottom:'10px' }}>
-            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
-              SERVICE
             </div>
-            <select className="sel" style={{ width:'100%', fontSize:'14px' }}
-              value={serviceFilter} onChange={e => handleServiceFilter(e.target.value)}>
-              <option value="">✦ {category ? `All in: ${category.slice(0,30)}` : 'Select category first'}</option>
-              {categoryServices.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
           </div>
 
           {/* Search + price sort */}
