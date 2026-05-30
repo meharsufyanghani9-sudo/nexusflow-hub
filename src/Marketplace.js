@@ -146,29 +146,40 @@ export default function Marketplace({ user, onNav }) {
   };
 
   // ─── Filter chip click — keyword search in service name ──
-  const handleCategory = (cat) => {
+  const handleCategory = (cat, sortOverride) => {
+    const activeSort = sortOverride !== undefined ? sortOverride : priceSort;
     setCategory(cat);
     setServiceFilter('');
     // Map chip id to search keyword
-    const keywords = {
-      'guaranteed': 'guaranteed',
-      'non-drop': 'non-drop',
-      'budget': 'budget',
-      'refill': 'refill',
-      'fast': 'fast',
-      'lifetime': 'lifetime',
+    // Keyword map — positive match OR negative match
+    const filterMap = {
+      'guaranteed':  { include: 'guaranteed',   exclude: null },
+      'non-drop':    { include: 'non-drop',      exclude: null },
+      'budget':      { include: 'budget',        exclude: null },
+      'with-refill': { include: 'SR-LT',         exclude: 'No Refill' },
+      'no-refill':   { include: 'No Refill',     exclude: null },
+      'fast':        { include: 'fast',           exclude: null },
+      'lifetime':    { include: 'lifetime',       exclude: null },
     };
-    const kw = keywords[cat] || '';
-    if (kw) {
-      setSearch(kw);
+    const flt = filterMap[cat];
+    if (flt) {
+      setSearch(flt.include);
       setLsLoading(true);
-      supabase.from('services').select('*')
+      // Build query — sort by priceSort if set
+      let q = supabase.from('services').select('*')
         .eq('is_active', true)
-        .ilike('name', `%${kw}%`)
-        .order('name').limit(200)
-        .then(({ data }) => {
+        .ilike('name', `%${flt.include}%`);
+      if (activeSort === 'asc') q = q.order('price_per_1k', { ascending: true });
+      else if (activeSort === 'desc') q = q.order('price_per_1k', { ascending: false });
+      else q = q.order('name');
+      q.limit(500).then(({ data }) => {
           let filtered = data || [];
+          // Apply platform filter
           if (platform !== 'all') filtered = filtered.filter(s => s.platform === platform);
+          // Apply exclude filter
+          if (flt.exclude) {
+            filtered = filtered.filter(s => !s.name.toLowerCase().includes(flt.exclude.toLowerCase()));
+          }
           setLsServices(filtered);
           setLsHasMore(false);
           setLsTotal(filtered.length);
@@ -217,8 +228,13 @@ export default function Marketplace({ user, onNav }) {
 
   const handlePriceSort = (val) => {
     setPriceSort(val);
-    setLsPage(1); setLsHasMore(true);
-    loadLivePage(1, true, platform, category, serviceFilter, val);
+    // If a filter chip is active, re-apply it with new sort
+    if (category) {
+      handleCategory(category, val);
+    } else {
+      setLsPage(1); setLsHasMore(true);
+      loadLivePage(1, true, platform, '', '', val);
+    }
   };
 
   // ─── Cost ─────────────────────────────────────────────────
@@ -411,7 +427,8 @@ export default function Marketplace({ user, onNav }) {
                 { id:'guaranteed', label:'Guaranteed', icon:'✅' },
                 { id:'non-drop', label:'Non-Drop', icon:'💎' },
                 { id:'budget', label:'Budget', icon:'💰' },
-                { id:'refill', label:'With Refill', icon:'🔄' },
+                { id:'with-refill', label:'With Refill', icon:'🔄' },
+                { id:'no-refill', label:'No Refill', icon:'🚫' },
                 { id:'fast', label:'Fast Delivery', icon:'⚡' },
                 { id:'lifetime', label:'Lifetime', icon:'♾️' },
               ].map(f => (
