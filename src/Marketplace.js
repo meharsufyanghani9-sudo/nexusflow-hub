@@ -22,6 +22,27 @@ const PLATFORMS = [
   { id: 'capcut',    label: 'CapCut',     icon: '🎬',  color: '#aaa' },
   { id: 'custom',    label: 'Other',      icon: '⚙️',  color: '#888' },
 ];
+const PLATFORM_SERVICE_TYPES = {
+  all:       ['Followers','Likes','Views','Comments','Shares','Subscribers','Saves','Members','Reactions','Traffic'],
+  tiktok:    ['Followers','Likes','Views','Comments','Shares','Saves'],
+  instagram: ['Followers','Likes','Views','Comments','Shares','Saves','Reels Views','Story Views'],
+  youtube:   ['Subscribers','Views','Likes','Comments','Watch Hours','Shares'],
+  facebook:  ['Followers','Likes','Views','Comments','Shares','Page Likes','Group Members','Reactions'],
+  twitter:   ['Followers','Likes','Retweets','Views','Comments'],
+  telegram:  ['Members','Views','Reactions','Post Views','Comments'],
+  spotify:   ['Followers','Plays','Streams','Monthly Listeners','Saves'],
+  linkedin:  ['Followers','Connections','Views','Likes','Comments'],
+  whatsapp:  ['Members','Views'],
+  snapchat:  ['Followers','Views','Story Views'],
+  discord:   ['Members','Server Boosts'],
+  threads:   ['Followers','Likes','Views','Comments','Shares'],
+  twitch:    ['Followers','Views','Live Views','Subscribers'],
+  google:    ['Reviews','Maps Reviews','Play Store Downloads'],
+  website:   ['Traffic','Visitors'],
+  capcut:    ['Followers','Views','Likes'],
+  custom:    ['Traffic','Views','Followers','Members'],
+};
+
 const platformMap = {};
 PLATFORMS.forEach(p => { platformMap[p.id] = p; });
 
@@ -47,6 +68,7 @@ export default function Marketplace({ user, onNav }) {
   // Filters
   const [tab, setTab]             = useState('featured');
   const [platform, setPlatform]   = useState('all');
+  const [serviceType, setServiceType] = useState('');
   const [search, setSearch]       = useState('');
   const [category, setCategory]   = useState('');
   const [serviceFilter, setServiceFilter] = useState('');
@@ -140,9 +162,37 @@ export default function Marketplace({ user, onNav }) {
   const handlePlatform = (p) => {
     setPlatform(p);
     setCategory('');
+    setServiceType('');
     setServiceFilter('');
     setSearch('');
     switchToLive(p, '', '');
+  };
+
+  // ─── Service type click ──────────────────────────────────
+  const handleServiceType = (stype) => {
+    setServiceType(stype);
+    setCategory('');
+    setSearch(stype);
+    if (!stype) {
+      setLsPage(1); setLsHasMore(true);
+      loadLivePage(1, true, platform, '', '', priceSort);
+      return;
+    }
+    setLsLoading(true);
+    let q = supabase.from('services').select('*')
+      .eq('is_active', true)
+      .ilike('name', `%${stype}%`);
+    if (platform !== 'all') q = q.eq('platform', platform);
+    if (priceSort === 'asc') q = q.order('price_per_1k', { ascending: true });
+    else if (priceSort === 'desc') q = q.order('price_per_1k', { ascending: false });
+    else q = q.order('created_at', { ascending: false });
+    q.limit(500).then(({ data }) => {
+      setLsServices(data || []);
+      setLsHasMore(false);
+      setLsTotal((data || []).length);
+      setLsLoading(false);
+      setTab('live');
+    });
   };
 
   // ─── Filter chip click — keyword search in service name ──
@@ -416,7 +466,34 @@ export default function Marketplace({ user, onNav }) {
             </div>
           </div>
 
-          {/* STAGE 2: Quick filter chips */}
+          {/* STAGE 2: Service Type chips - per platform */}
+          <div style={{ marginBottom:'12px' }}>
+            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
+              SELECT SERVICE
+            </div>
+            <div style={{ display:'flex', gap:'6px', overflowX:'auto', paddingBottom:'4px' }}>
+              <button onClick={() => handleServiceType('')}
+                style={{
+                  padding:'6px 12px', borderRadius:'20px', cursor:'pointer', flexShrink:0,
+                  fontSize:'11px', fontWeight:700, whiteSpace:'nowrap', transition:'.15s',
+                  background: serviceType === '' ? 'var(--neon)' : 'var(--gl)',
+                  color: serviceType === '' ? '#000' : 'var(--text2)',
+                  border: serviceType === '' ? 'none' : '1px solid var(--br)',
+                }}>✦ All</button>
+              {(PLATFORM_SERVICE_TYPES[platform] || PLATFORM_SERVICE_TYPES['all']).map(st => (
+                <button key={st} onClick={() => handleServiceType(st)}
+                  style={{
+                    padding:'6px 12px', borderRadius:'20px', cursor:'pointer', flexShrink:0,
+                    fontSize:'11px', fontWeight:700, whiteSpace:'nowrap', transition:'.15s',
+                    background: serviceType === st ? 'var(--neon)' : 'var(--gl)',
+                    color: serviceType === st ? '#000' : 'var(--text2)',
+                    border: serviceType === st ? 'none' : '1px solid var(--br)',
+                  }}>{st}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* STAGE 4: Filter by type chips */}
           <div style={{ marginBottom:'12px' }}>
             <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
               FILTER BY TYPE
