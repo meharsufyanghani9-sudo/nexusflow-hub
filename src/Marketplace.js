@@ -93,14 +93,17 @@ export default function Marketplace({ user, onNav }) {
   );
 
   // ─── Load live page ───────────────────────────────────────
-  const loadLivePage = useCallback(async (pageNum, reset = false, pf = 'all', cat = '', svcId = '') => {
+  const loadLivePage = useCallback(async (pageNum, reset = false, pf = 'all', cat = '', svcId = '', sort = '') => {
     setLsLoading(true);
     const from = (pageNum - 1) * PAGE_SIZE;
     const to   = from + PAGE_SIZE - 1;
     let query = supabase.from('services').select('*', { count: 'exact' })
       .eq('is_active', true)
-      .order('created_at', { ascending: false })
       .range(from, to);
+    // Server-side price sort
+    if (sort === 'asc') query = query.order('price_per_1k', { ascending: true });
+    else if (sort === 'desc') query = query.order('price_per_1k', { ascending: false });
+    else query = query.order('created_at', { ascending: false });
     if (pf && pf !== 'all') query = query.eq('platform', pf);
     if (cat) query = query.eq('category', cat);
     if (svcId) query = query.eq('id', svcId);
@@ -120,17 +123,17 @@ export default function Marketplace({ user, onNav }) {
       if (entries[0].isIntersecting && lsHasMore && !lsLoading && !search && !serviceFilter) {
         const next = lsPage + 1;
         setLsPage(next);
-        loadLivePage(next, false, platform, category, serviceFilter);
+        loadLivePage(next, false, platform, category, serviceFilter, priceSort);
       }
     }, { threshold: 0.1 });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
   }, [lsHasMore, lsLoading, lsPage, loadLivePage, search, platform, category, serviceFilter]);
 
-  const switchToLive = (pf = platform, cat = category, svc = serviceFilter) => {
+  const switchToLive = (pf = platform, cat = category, svc = serviceFilter, sort = priceSort) => {
     setTab('live');
     setLsPage(1); setLsHasMore(true);
-    loadLivePage(1, true, pf, cat, svc);
+    loadLivePage(1, true, pf, cat, svc, sort);
   };
 
   // ─── Platform click ───────────────────────────────────────
@@ -180,13 +183,14 @@ export default function Marketplace({ user, onNav }) {
     }
   };
 
-  // ─── Price sort ───────────────────────────────────────────
-  const sortedLive = priceSort
-    ? [...lsServices].sort((a, b) =>
-        priceSort === 'asc'
-          ? parseFloat(a.price_per_1k) - parseFloat(b.price_per_1k)
-          : parseFloat(b.price_per_1k) - parseFloat(a.price_per_1k))
-    : lsServices;
+  // Price sort is server-side — sortedLive is just lsServices
+  const sortedLive = lsServices;
+
+  const handlePriceSort = (val) => {
+    setPriceSort(val);
+    setLsPage(1); setLsHasMore(true);
+    loadLivePage(1, true, platform, category, serviceFilter, val);
+  };
 
   // ─── Cost ─────────────────────────────────────────────────
   const cost = selected && qty
@@ -405,7 +409,7 @@ export default function Marketplace({ user, onNav }) {
               placeholder="🔍 Search services..."
               value={search} onChange={e => handleSearch(e.target.value)} />
             <select className="sel" style={{ minWidth:'130px', flexShrink:0, fontSize:'14px' }}
-              value={priceSort} onChange={e => setPriceSort(e.target.value)}>
+              value={priceSort} onChange={e => handlePriceSort(e.target.value)}>
               <option value="">💰 Price: Default</option>
               <option value="asc">💰 Low → High</option>
               <option value="desc">💰 High → Low</option>
