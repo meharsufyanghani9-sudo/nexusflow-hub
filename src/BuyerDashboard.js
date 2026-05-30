@@ -150,7 +150,10 @@ export default function BuyerDashboard({ user, onNav }) {
                   <td style={{ fontFamily:'var(--fm)' }}>{o.quantity?.toLocaleString()}</td>
                   <td style={{ color:'var(--gold)', fontFamily:'var(--fm)' }}>{format(parseFloat(o.cost||0))}</td>
                   <td><span className={`bdg ${badgeClass(o.status)}`}>{o.status?.replace('_',' ')}</span></td>
-                  <td style={{ color:'var(--text3)', fontSize:'10px' }}>{new Date(o.created_at).toLocaleDateString()}</td>
+                  <td style={{ color:'var(--text3)', fontSize:'10px', whiteSpace:'nowrap' }}>
+                    <div>{new Date(o.created_at).toLocaleDateString()}</div>
+                    <div style={{fontSize:'9px'}}>{new Date(o.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true})}</div>
+                  </td>
                 </tr>
               ))}
             </tbody>
