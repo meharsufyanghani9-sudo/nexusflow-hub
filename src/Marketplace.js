@@ -371,37 +371,33 @@ export default function Marketplace({ user, onNav }) {
             </div>
           </div>
 
-          {/* STAGE 2: Category dropdown */}
-          {categories.length > 0 && (
-            <div style={{ marginBottom:'10px' }}>
-              <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
-                CATEGORY
-              </div>
-              <select className="sel" style={{ width:'100%', fontSize:'14px' }}
-                value={category} onChange={e => handleCategory(e.target.value)}>
-                <option value="">✦ All Categories</option>
-                {categories.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+          {/* STAGE 2: Category dropdown - always show */}
+          <div style={{ marginBottom:'10px' }}>
+            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
+              CATEGORY
             </div>
-          )}
+            <select className="sel" style={{ width:'100%', fontSize:'14px' }}
+              value={category} onChange={e => handleCategory(e.target.value)}>
+              <option value="">✦ All Categories</option>
+              {categories.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
 
-          {/* STAGE 3: Service dropdown */}
-          {category && categoryServices.length > 0 && (
-            <div style={{ marginBottom:'10px' }}>
-              <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
-                SERVICE
-              </div>
-              <select className="sel" style={{ width:'100%', fontSize:'14px' }}
-                value={serviceFilter} onChange={e => handleServiceFilter(e.target.value)}>
-                <option value="">✦ All Services in Category</option>
-                {categoryServices.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+          {/* STAGE 3: Service dropdown - show when category selected */}
+          <div style={{ marginBottom:'10px' }}>
+            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'6px' }}>
+              SERVICE
             </div>
-          )}
+            <select className="sel" style={{ width:'100%', fontSize:'14px' }}
+              value={serviceFilter} onChange={e => handleServiceFilter(e.target.value)}>
+              <option value="">✦ {category ? `All in: ${category.slice(0,30)}` : 'Select category first'}</option>
+              {categoryServices.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
 
           {/* Search + price sort */}
           <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
