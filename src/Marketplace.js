@@ -169,13 +169,14 @@ export default function Marketplace({ user, onNav }) {
   };
 
   // ─── Service type click ──────────────────────────────────
-  const handleServiceType = (stype) => {
+  const handleServiceType = (stype, sortOverride) => {
+    const activeSort = sortOverride !== undefined ? sortOverride : priceSort;
     setServiceType(stype);
     setCategory('');
     setSearch(stype);
     if (!stype) {
       setLsPage(1); setLsHasMore(true);
-      loadLivePage(1, true, platform, '', '', priceSort);
+      loadLivePage(1, true, platform, '', '', activeSort);
       return;
     }
     setLsLoading(true);
@@ -183,8 +184,8 @@ export default function Marketplace({ user, onNav }) {
       .eq('is_active', true)
       .ilike('name', `%${stype}%`);
     if (platform !== 'all') q = q.eq('platform', platform);
-    if (priceSort === 'asc') q = q.order('price_per_1k', { ascending: true });
-    else if (priceSort === 'desc') q = q.order('price_per_1k', { ascending: false });
+    if (activeSort === 'asc') q = q.order('price_per_1k', { ascending: true });
+    else if (activeSort === 'desc') q = q.order('price_per_1k', { ascending: false });
     else q = q.order('created_at', { ascending: false });
     q.limit(500).then(({ data }) => {
       setLsServices(data || []);
@@ -278,10 +279,14 @@ export default function Marketplace({ user, onNav }) {
 
   const handlePriceSort = (val) => {
     setPriceSort(val);
-    // If a filter chip is active, re-apply it with new sort
-    if (category) {
+    if (serviceType) {
+      // Re-apply service type filter with new sort
+      handleServiceType(serviceType, val);
+    } else if (category) {
+      // Re-apply filter chip with new sort
       handleCategory(category, val);
     } else {
+      // Normal paginated load with new sort
       setLsPage(1); setLsHasMore(true);
       loadLivePage(1, true, platform, '', '', val);
     }
@@ -449,16 +454,16 @@ export default function Marketplace({ user, onNav }) {
               {PLATFORMS.map(p => (
                 <button key={p.id} onClick={() => handlePlatform(p.id)} style={{
                   display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                  padding:'8px 4px', borderRadius:'10px', cursor:'pointer', transition:'.15s', gap:'4px',
+                  padding:'6px 3px', borderRadius:'8px', cursor:'pointer', transition:'.15s', gap:'3px',
                   border: platform === p.id ? `2px solid ${p.color}` : '1px solid var(--br)',
                   background: platform === p.id ? `${p.color}18` : 'var(--gl)',
                 }}>
-                  <span style={{ fontSize:'18px', lineHeight:1 }}>{p.icon}</span>
+                  <span style={{ fontSize:'15px', lineHeight:1 }}>{p.icon}</span>
                   <span style={{
-                    fontSize:'8px', fontWeight:700, color: platform === p.id ? p.color : 'var(--text3)',
-                    letterSpacing:'0.3px', textAlign:'center', lineHeight:1.2,
+                    fontSize:'7px', fontWeight:700, color: platform === p.id ? p.color : 'var(--text3)',
+                    letterSpacing:'0.2px', textAlign:'center', lineHeight:1.2,
                     border: `1px solid ${platform === p.id ? p.color : 'var(--br)'}`,
-                    padding:'1px 4px', borderRadius:'20px',
+                    padding:'1px 3px', borderRadius:'20px',
                     background: platform === p.id ? `${p.color}20` : 'transparent',
                   }}>{p.label}</span>
                 </button>
@@ -466,29 +471,39 @@ export default function Marketplace({ user, onNav }) {
             </div>
           </div>
 
-          {/* STAGE 2: Service Type chips - per platform */}
+          {/* STAGE 2: Service Type - attractive icon grid */}
           <div style={{ marginBottom:'12px' }}>
             <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
               SELECT SERVICE
             </div>
-            <div style={{ display:'flex', gap:'6px', overflowX:'auto', paddingBottom:'4px' }}>
-              <button onClick={() => handleServiceType('')}
-                style={{
-                  padding:'6px 12px', borderRadius:'20px', cursor:'pointer', flexShrink:0,
-                  fontSize:'11px', fontWeight:700, whiteSpace:'nowrap', transition:'.15s',
-                  background: serviceType === '' ? 'var(--neon)' : 'var(--gl)',
-                  color: serviceType === '' ? '#000' : 'var(--text2)',
-                  border: serviceType === '' ? 'none' : '1px solid var(--br)',
-                }}>✦ All</button>
-              {(PLATFORM_SERVICE_TYPES[platform] || PLATFORM_SERVICE_TYPES['all']).map(st => (
-                <button key={st} onClick={() => handleServiceType(st)}
-                  style={{
-                    padding:'6px 12px', borderRadius:'20px', cursor:'pointer', flexShrink:0,
-                    fontSize:'11px', fontWeight:700, whiteSpace:'nowrap', transition:'.15s',
-                    background: serviceType === st ? 'var(--neon)' : 'var(--gl)',
-                    color: serviceType === st ? '#000' : 'var(--text2)',
-                    border: serviceType === st ? 'none' : '1px solid var(--br)',
-                  }}>{st}</button>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'6px' }}>
+              {[{id:'', label:'All', icon:'✦'}, ...(PLATFORM_SERVICE_TYPES[platform]||PLATFORM_SERVICE_TYPES['all']).map(st => ({
+                id: st, label: st,
+                icon: st==='Followers'?'👥':st==='Likes'?'❤️':st==='Views'?'👁':st==='Comments'?'💬':
+                      st==='Shares'?'🔗':st==='Saves'?'🔖':st==='Subscribers'?'🔔':st==='Members'?'👥':
+                      st==='Reactions'?'😍':st==='Retweets'?'🔄':st==='Watch Hours'?'⏱':
+                      st==='Reels Views'?'🎬':st==='Story Views'?'📖':st==='Page Likes'?'👍':
+                      st==='Group Members'?'👫':st==='Post Views'?'📢':st==='Plays'?'▶️':
+                      st==='Streams'?'🎵':st==='Monthly Listeners'?'🎧':st==='Connections'?'🤝':
+                      st==='Live Views'?'🔴':st==='Reviews'?'⭐':st==='Maps Reviews'?'📍':
+                      st==='Play Store Downloads'?'📲':st==='Traffic'?'🌐':st==='Visitors'?'🚶':
+                      st==='Server Boosts'?'🚀':st==='Impressions'?'📊':'⚡'
+              }))].map(item => (
+                <button key={item.id} onClick={() => handleServiceType(item.id)} style={{
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                  padding:'8px 4px', borderRadius:'10px', cursor:'pointer', transition:'.15s', gap:'3px',
+                  border: serviceType === item.id ? '2px solid var(--neon)' : '1px solid var(--br)',
+                  background: serviceType === item.id ? 'rgba(0,212,255,.15)' : 'var(--gl)',
+                }}>
+                  <span style={{ fontSize:'16px', lineHeight:1 }}>{item.icon}</span>
+                  <span style={{
+                    fontSize:'8px', fontWeight:700, textAlign:'center', lineHeight:1.2,
+                    color: serviceType === item.id ? 'var(--neon)' : 'var(--text3)',
+                    border: `1px solid ${serviceType === item.id ? 'var(--neon)' : 'var(--br)'}`,
+                    padding:'1px 4px', borderRadius:'20px',
+                    background: serviceType === item.id ? 'rgba(0,212,255,.1)' : 'transparent',
+                  }}>{item.label}</span>
+                </button>
               ))}
             </div>
           </div>
@@ -511,7 +526,7 @@ export default function Marketplace({ user, onNav }) {
               ].map(f => (
                 <button key={f.id} onClick={() => handleCategory(f.id)}
                   style={{
-                    padding:'6px 12px', borderRadius:'20px', cursor:'pointer',
+                    padding:'5px 10px', borderRadius:'20px', cursor:'pointer',
                     fontSize:'11px', fontWeight:700, whiteSpace:'nowrap',
                     transition:'.15s',
                     background: category === f.id ? 'var(--neon)' : 'var(--gl)',
