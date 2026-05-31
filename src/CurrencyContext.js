@@ -4,9 +4,8 @@ import { supabase } from './supabase';
 const CurrencyContext = createContext();
 
 export function CurrencyProvider({ children }) {
-  // Default is PKR — user can change via currency switcher
   const [currency, setCurrency] = useState({
-    code: 'PKR', symbol: 'Rs', name: 'Pakistani Rupee', rate: 278
+    code:'USD', symbol:'$', name:'US Dollar', rate:1
   });
   const [allCurrencies, setAllCurrencies] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -21,14 +20,9 @@ export function CurrencyProvider({ children }) {
       setAllCurrencies(data);
       const saved = localStorage.getItem('nf_currency_code');
       if (saved) {
-        // Respect user's saved preference
         const found = data.find(c => c.code === saved);
-        if (found) { setCurrency(found); setLoaded(true); return; }
+        if (found) setCurrency(found);
       }
-      // No saved preference — use PKR if available, else first currency
-      const pkr = data.find(c => c.code === 'PKR');
-      if (pkr) setCurrency(pkr);
-      else setCurrency(data[0]);
     }
     setLoaded(true);
   };
@@ -41,19 +35,22 @@ export function CurrencyProvider({ children }) {
   const format = (usdAmount) => {
     const amt = parseFloat(usdAmount) || 0;
     const converted = amt * parseFloat(currency.rate || 1);
-    const decimals = ['USD', 'EUR', 'GBP'].includes(currency.code) ? 2 : 0;
+    // Always show 2 decimals if amount is less than 1, else 0 for non-USD
+    let decimals;
+    if (['USD','EUR','GBP'].includes(currency.code)) {
+      decimals = 2;
+    } else if (converted > 0 && converted < 1) {
+      decimals = 2; // show paisa e.g. Rs0.50
+    } else if (converted >= 1 && converted < 10) {
+      decimals = 1; // show e.g. Rs3.5
+    } else {
+      decimals = 0; // Rs40
+    }
     return `${currency.symbol}${converted.toFixed(decimals)}`;
   };
 
-  // Format with explicit decimals control
-  const formatFixed = (usdAmount, dec = 2) => {
-    const amt = parseFloat(usdAmount) || 0;
-    const converted = amt * parseFloat(currency.rate || 1);
-    return `${currency.symbol}${converted.toFixed(dec)}`;
-  };
-
   return (
-    <CurrencyContext.Provider value={{ currency, allCurrencies, changeCurrency, format, formatFixed, loadCurrencies, loaded }}>
+    <CurrencyContext.Provider value={{ currency, allCurrencies, changeCurrency, format, loadCurrencies }}>
       {children}
     </CurrencyContext.Provider>
   );
