@@ -72,9 +72,28 @@ export default function Orders({ user }) {
 
   const canRefill = (order) => {
     if (order.status !== 'completed') return false;
-    if (!order.has_refill) return false;
     if (order.refill_requested) return false;
+    // Allow refill if service has refill flag OR service name contains refill keywords
+    const name = (order.service_name || '').toLowerCase();
+    const hasRefillByName = name.includes('sr-lt') || name.includes('lifetime') || 
+                            name.includes('guaranteed') || name.includes('refill');
+    if (!order.has_refill && !hasRefillByName) return false;
     return true;
+  };
+
+  const reOrder = async (order) => {
+    // Navigate to marketplace with pre-filled service
+    if (window.confirm(`Reorder "${order.service_name}"?`)) {
+      // Store reorder info and redirect to marketplace
+      sessionStorage.setItem('reorder', JSON.stringify({
+        service_id: order.service_id,
+        service_name: order.service_name,
+        link: order.link,
+        quantity: order.quantity,
+      }));
+      window.location.hash = 'marketplace';
+      window.dispatchEvent(new PopStateEvent('popstate', { state: { page: 'marketplace' } }));
+    }
   };
 
   const cancelOrder = async (order) => {
@@ -222,27 +241,38 @@ export default function Orders({ user }) {
                       {canCancel(o) && (
                         <button onClick={() => cancelOrder(o)}
                           style={{
-                            padding:'4px 10px', borderRadius:'6px',
+                            padding:'4px 8px', borderRadius:'6px',
                             border:'1px solid rgba(255,50,50,.3)',
                             background:'rgba(255,50,50,.1)', color:'#ff6b6b',
-                            cursor:'pointer', fontSize:'11px', whiteSpace:'nowrap'
+                            cursor:'pointer', fontSize:'10px', whiteSpace:'nowrap'
                           }}>
                           Cancel
                         </button>
                       )}
-                      {canRefill(o) && (
+                      {canRefill(o) && !o.refill_requested && (
                         <button onClick={() => refillOrder(o)}
                           style={{
-                            padding:'4px 10px', borderRadius:'6px',
+                            padding:'4px 8px', borderRadius:'6px',
                             border:'1px solid rgba(0,255,136,.3)',
                             background:'rgba(0,255,136,.1)', color:'var(--green)',
-                            cursor:'pointer', fontSize:'11px', whiteSpace:'nowrap'
+                            cursor:'pointer', fontSize:'10px', whiteSpace:'nowrap'
                           }}>
                           🔁 Refill
                         </button>
                       )}
                       {o.refill_requested && (
-                        <span style={{ fontSize:'10px', color:'var(--gold)' }}>⏳ Refill pending</span>
+                        <span style={{ fontSize:'9px', color:'var(--gold)' }}>⏳ Refill</span>
+                      )}
+                      {(o.status === 'completed' || o.status === 'cancelled') && (
+                        <button onClick={() => reOrder(o)}
+                          style={{
+                            padding:'4px 8px', borderRadius:'6px',
+                            border:'1px solid rgba(0,150,255,.3)',
+                            background:'rgba(0,150,255,.1)', color:'#4da6ff',
+                            cursor:'pointer', fontSize:'10px', whiteSpace:'nowrap'
+                          }}>
+                          🔄 Reorder
+                        </button>
                       )}
                     </div>
                   </td>
