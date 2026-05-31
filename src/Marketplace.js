@@ -450,7 +450,7 @@ export default function Marketplace({ user, onNav }) {
             <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
               SELECT PLATFORM
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'6px' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'4px' }}>
               {PLATFORMS.map(p => (
                 <button key={p.id} onClick={() => handlePlatform(p.id)} style={{
                   display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
@@ -476,7 +476,7 @@ export default function Marketplace({ user, onNav }) {
             <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
               SELECT SERVICE
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'6px' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'4px' }}>
               {[{id:'', label:'All', icon:'✦'}, ...(PLATFORM_SERVICE_TYPES[platform]||PLATFORM_SERVICE_TYPES['all']).map(st => ({
                 id: st, label: st,
                 icon: st==='Followers'?'👥':st==='Likes'?'❤️':st==='Views'?'👁':st==='Comments'?'💬':
@@ -491,16 +491,16 @@ export default function Marketplace({ user, onNav }) {
               }))].map(item => (
                 <button key={item.id} onClick={() => handleServiceType(item.id)} style={{
                   display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                  padding:'8px 4px', borderRadius:'10px', cursor:'pointer', transition:'.15s', gap:'3px',
+                  padding:'6px 2px', borderRadius:'8px', cursor:'pointer', transition:'.15s', gap:'2px',
                   border: serviceType === item.id ? '2px solid var(--neon)' : '1px solid var(--br)',
                   background: serviceType === item.id ? 'rgba(0,212,255,.15)' : 'var(--gl)',
                 }}>
-                  <span style={{ fontSize:'16px', lineHeight:1 }}>{item.icon}</span>
+                  <span style={{ fontSize:'13px', lineHeight:1 }}>{item.icon}</span>
                   <span style={{
-                    fontSize:'8px', fontWeight:700, textAlign:'center', lineHeight:1.2,
+                    fontSize:'7px', fontWeight:700, textAlign:'center', lineHeight:1.2,
                     color: serviceType === item.id ? 'var(--neon)' : 'var(--text3)',
                     border: `1px solid ${serviceType === item.id ? 'var(--neon)' : 'var(--br)'}`,
-                    padding:'1px 4px', borderRadius:'20px',
+                    padding:'1px 3px', borderRadius:'20px',
                     background: serviceType === item.id ? 'rgba(0,212,255,.1)' : 'transparent',
                   }}>{item.label}</span>
                 </button>
