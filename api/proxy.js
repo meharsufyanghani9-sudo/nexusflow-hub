@@ -34,6 +34,13 @@ export default async function handler(req, res) {
     if (link)     params.append('link', link);
     if (quantity) params.append('quantity', String(quantity));
     if (order)    params.append('order', String(order));
+    // Pass any extra fields from body
+    const known = ['url','key','action','service','link','quantity','order'];
+    Object.keys(body).forEach(k => {
+      if (!known.includes(k) && body[k] !== undefined && body[k] !== null) {
+        params.append(k, String(body[k]));
+      }
+    });
 
     const response = await fetch(url, {
       method: 'POST',
