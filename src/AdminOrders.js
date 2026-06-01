@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
+const PER_PAGE = 30;
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
@@ -10,50 +11,94 @@ export default function AdminOrders() {
   const [search, setSearch] = useState('');
   const [msg, setMsg] = useState('');
   const [updating, setUpdating] = useState(null);
+  // ── FIX: Server-side pagination state ────────────────────────────────────
   const [page, setPage] = useState(1);
-  const PER_PAGE = 30;
+  const [totalCount, setTotalCount] = useState(0);
+  // Stats are tracked separately so they always show total counts, not just this page
+  const [stats, setStats] = useState({ total: 0, pending: 0, inProgress: 0, completed: 0, revenue: 0 });
 
-  useEffect(() => { loadOrders(); }, []);
-
-  const loadOrders = async () => {
+  // ── FIX: loadOrders now uses server-side .range() pagination ─────────────
+  // OLD CODE loaded ALL orders at once — at 50,000 orders this crashes the browser.
+  // NEW CODE loads only 30 rows at a time from the database.
+  const loadOrders = useCallback(async (pageNum = 1, statusFilter = 'all', searchTerm = '') => {
     setLoading(true);
-    // Batch loop past Supabase 1000-row limit
-    let allOrders = [];
-    let from = 0;
-    const BATCH = 1000;
-    while (true) {
-      const { data, error } = await supabase
-        .from('orders').select('*')
-        .order('created_at', { ascending: false })
-        .range(from, from + BATCH - 1);
-      if (error || !data || data.length === 0) break;
-      allOrders = [...allOrders, ...data];
-      if (data.length < BATCH) break;
-      from += BATCH;
+    const from = (pageNum - 1) * PER_PAGE;
+    const to = from + PER_PAGE - 1;
+
+    let query = supabase
+      .from('orders')
+      .select('*, users(full_name, email)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (statusFilter !== 'all') {
+      query = query.eq('status', statusFilter);
     }
-    // Enrich with user info (avoids FK join issues)
-    if (allOrders.length > 0) {
-      const userIds = [...new Set(allOrders.map(o => o.user_id).filter(Boolean))];
-      const { data: users } = await supabase
-        .from('users').select('id,full_name,email').in('id', userIds);
-      const userMap = {};
-      (users || []).forEach(u => { userMap[u.id] = u; });
-      allOrders = allOrders.map(o => ({ ...o, users: userMap[o.user_id] || null }));
+    if (searchTerm.trim()) {
+      // Search across ref, service name, and link
+      query = query.or(
+        `order_ref.ilike.%${searchTerm}%,service_name.ilike.%${searchTerm}%,link.ilike.%${searchTerm}%`
+      );
     }
-    setOrders(allOrders);
+
+    const { data, count } = await query;
+    if (data) setOrders(data);
+    if (count !== null) setTotalCount(count);
     setLoading(false);
+  }, []);
+
+  // Load summary stats separately (these are lightweight aggregate counts)
+  const loadStats = useCallback(async () => {
+    const { data } = await supabase
+      .from('orders')
+      .select('status, cost');
+    if (data) {
+      setStats({
+        total:      data.length,
+        pending:    data.filter(o => o.status === 'pending').length,
+        inProgress: data.filter(o => o.status === 'in_progress').length,
+        completed:  data.filter(o => o.status === 'completed').length,
+        revenue:    data.reduce((a, b) => a + parseFloat(b.cost || 0), 0),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOrders(1, 'all', '');
+    loadStats();
+  }, [loadOrders, loadStats]);
+
+  // When filter or search changes, reset to page 1 and reload
+  const handleFilterChange = (newFilter) => {
+    setFilter(newFilter);
+    setPage(1);
+    loadOrders(1, newFilter, search);
   };
 
+  const handleSearchChange = (val) => {
+    setSearch(val);
+    setPage(1);
+    loadOrders(1, filter, val);
+  };
+
+  const handlePageChange = (newPage) => {
+    setPage(newPage);
+    loadOrders(newPage, filter, search);
+  };
+
+  const totalPages = Math.ceil(totalCount / PER_PAGE);
+
   const updateStatus = async (orderId, newStatus) => {
+    if (updating) return;
     setUpdating(orderId);
-    // FIX: removed updated_at — that column does not exist in the orders table
     const { error } = await supabase
       .from('orders')
       .update({ status: newStatus })
       .eq('id', orderId);
     if (!error) {
       setMsg(`✅ Order updated to "${newStatus}"`);
-      loadOrders();
+      loadOrders(page, filter, search);
+      loadStats();
       setTimeout(() => setMsg(''), 3000);
     } else {
       setMsg('❌ Update failed: ' + error.message);
@@ -62,10 +107,13 @@ export default function AdminOrders() {
   };
 
   const refundOrder = async (order) => {
+    if (updating) return;
     if (!window.confirm(`Refund $${parseFloat(order.cost || 0).toFixed(2)} and cancel order?`)) return;
     setUpdating(order.id);
+
     const { data: profile } = await supabase
       .from('users').select('balance').eq('id', order.user_id).single();
+
     if (profile) {
       const newBal = parseFloat(profile.balance || 0) + parseFloat(order.cost || 0);
       await supabase.from('users').update({ balance: newBal }).eq('id', order.user_id);
@@ -73,37 +121,28 @@ export default function AdminOrders() {
         user_id: order.user_id,
         type: 'refund',
         amount: parseFloat(order.cost || 0),
-        description: `Refund: Order ${order.order_ref || order.id}`,
-        ref_id: order.order_ref,
+        description: `Admin refund: Order ${order.order_ref || order.id}`,
+        ref_id: order.order_ref || order.id,
       });
     }
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id);
     setMsg('✅ Order refunded and cancelled.');
-    loadOrders();
+    loadOrders(page, filter, search);
+    loadStats();
     setTimeout(() => setMsg(''), 4000);
     setUpdating(null);
   };
 
-  const filtered = orders.filter(o => {
-    const matchStatus = filter === 'all' || o.status === filter;
-    const matchSearch = !search ||
-      (o.order_ref || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.service_name || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.link || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.users?.email || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.users?.full_name || '').toLowerCase().includes(search.toLowerCase());
-    return matchStatus && matchSearch;
-  });
-
-  const totalPages = Math.ceil(filtered.length / PER_PAGE);
-  const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-
-  const stats = {
-    total: orders.length,
-    pending: orders.filter(o => o.status === 'pending').length,
-    inProgress: orders.filter(o => o.status === 'in_progress').length,
-    completed: orders.filter(o => o.status === 'completed').length,
-    revenue: orders.reduce((a, b) => a + parseFloat(b.cost || 0), 0),
+  // ── FIX: Safe link renderer — blocks javascript: / data: XSS in the link column
+  const safeLink = (rawLink) => {
+    if (!rawLink) return null;
+    try {
+      const parsed = new URL(rawLink.startsWith('http') ? rawLink : 'https://' + rawLink);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+      return parsed.href;
+    } catch {
+      return null;
+    }
   };
 
   return (
@@ -118,13 +157,14 @@ export default function AdminOrders() {
         }}>{msg}</div>
       )}
 
+      {/* Stats — always show totals across ALL orders, not just this page */}
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '📦', lb: 'Total Orders', vl: stats.total,                       cl: 'cn'  },
-          { ic: '⏳', lb: 'Pending',      vl: stats.pending,                      cl: 'cw'  },
-          { ic: '⚡', lb: 'In Progress',  vl: stats.inProgress,                   cl: 'cn'  },
-          { ic: '✅', lb: 'Completed',    vl: stats.completed,                     cl: 'cg'  },
-          { ic: '💰', lb: 'Revenue',      vl: `$${stats.revenue.toFixed(2)}`,      cl: 'cgo' },
+          { ic: '📦', lb: 'Total Orders', vl: stats.total,                      cl: 'cn'  },
+          { ic: '⏳', lb: 'Pending',      vl: stats.pending,                     cl: 'cw'  },
+          { ic: '⚡', lb: 'In Progress',  vl: stats.inProgress,                  cl: 'cn'  },
+          { ic: '✅', lb: 'Completed',    vl: stats.completed,                    cl: 'cg'  },
+          { ic: '💰', lb: 'Revenue',      vl: `$${stats.revenue.toFixed(2)}`,     cl: 'cgo' },
         ].map((s, i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -134,16 +174,28 @@ export default function AdminOrders() {
         ))}
       </div>
 
+      {/* Search */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <input className="srch-inp" style={{ flex: 1, minWidth: '160px' }}
-          placeholder="🔍 Search by order ID, service, user, link..."
-          value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
-        <button className="btn bgh bsm" onClick={loadOrders}>🔄 Refresh</button>
+        <input
+          className="srch-inp"
+          style={{ flex: 1, minWidth: '160px' }}
+          placeholder="🔍 Search by order ID, service, or link..."
+          value={search}
+          onChange={e => handleSearchChange(e.target.value)}
+        />
+        <button
+          className="btn bgh bsm"
+          onClick={() => { loadOrders(page, filter, search); loadStats(); }}>
+          🔄 Refresh
+        </button>
       </div>
 
+      {/* Status filter tabs */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
         {statusList.map(s => (
-          <button key={s} onClick={() => { setFilter(s); setPage(1); }}
+          <button
+            key={s}
+            onClick={() => handleFilterChange(s)}
             style={{
               padding: '5px 12px', borderRadius: '20px', cursor: 'pointer',
               fontFamily: 'var(--fu)', fontSize: '10px', fontWeight: 700,
@@ -152,7 +204,8 @@ export default function AdminOrders() {
               color: filter === s ? '#000' : 'var(--text3)',
               border: filter === s ? 'none' : '1px solid var(--br)',
             }}>
-            {s.replace('_', ' ')} ({s === 'all' ? orders.length : orders.filter(o => o.status === s).length})
+            {s.replace('_', ' ')}
+            {s === 'all' ? ` (${stats.total})` : ` (${stats[s === 'in_progress' ? 'inProgress' : s] ?? ''})`}
           </button>
         ))}
       </div>
@@ -161,6 +214,12 @@ export default function AdminOrders() {
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>Loading orders...</div>
       ) : (
         <>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '10px' }}>
+            Showing {orders.length} of {totalCount} orders
+            {filter !== 'all' ? ` with status "${filter}"` : ''}
+            {search ? ` matching "${search}"` : ''}
+          </div>
+
           <div className="tblw">
             <table>
               <thead>
@@ -177,15 +236,22 @@ export default function AdminOrders() {
                 </tr>
               </thead>
               <tbody>
-                {paginated.length === 0 ? (
+                {orders.length === 0 ? (
                   <tr>
-                    <td colSpan="9" style={{ textAlign: 'center', padding: '32px', color: 'var(--text3)' }}>No orders found</td>
+                    <td colSpan="9" style={{ textAlign: 'center', padding: '32px', color: 'var(--text3)' }}>
+                      No orders found
+                    </td>
                   </tr>
-                ) : paginated.map(o => (
+                ) : orders.map(o => (
                   <tr key={o.id}>
                     <td style={{ fontFamily: 'var(--fm)', color: 'var(--neon)', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.order_ref || o.id}
-                      {o.provider_order_id && <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.provider_order_id}</div>}
+                      {o.vendor_order_id && (
+                        <div style={{ fontSize: '9px', color: 'var(--text3)' }}>P: {o.vendor_order_id}</div>
+                      )}
+                      {o.needs_manual_processing && (
+                        <div style={{ fontSize: '9px', color: 'var(--danger)', fontWeight: 700 }}>⚠️ Manual</div>
+                      )}
                     </td>
                     <td style={{ fontSize: '11px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <div style={{ color: 'var(--text)', fontWeight: 600 }}>{o.users?.full_name || '—'}</div>
@@ -195,12 +261,24 @@ export default function AdminOrders() {
                       {o.service_name}
                     </td>
                     <td style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <a href={o.link} target="_blank" rel="noreferrer"
-                        style={{ color: 'var(--neon)', fontSize: '10px', textDecoration: 'none' }}>
-                        {o.link ? '🔗 View' : '—'}
-                      </a>
+                      {/* ── FIX: Only render link if it passes the safe URL check (blocks XSS) */}
+                      {safeLink(o.link) ? (
+                        <a
+                          href={safeLink(o.link)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: 'var(--neon)', fontSize: '10px', textDecoration: 'none' }}>
+                          🔗 View
+                        </a>
+                      ) : (
+                        <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
+                          {o.link ? '⚠️ Invalid' : '—'}
+                        </span>
+                      )}
                     </td>
-                    <td style={{ fontFamily: 'var(--fm)', fontSize: '11px' }}>{(o.quantity || 0).toLocaleString()}</td>
+                    <td style={{ fontFamily: 'var(--fm)', fontSize: '11px' }}>
+                      {(o.quantity || 0).toLocaleString()}
+                    </td>
                     <td style={{ color: 'var(--gold)', fontFamily: 'var(--fm)', fontWeight: 700, fontSize: '12px' }}>
                       ${parseFloat(o.cost || 0).toFixed(2)}
                     </td>
@@ -212,7 +290,8 @@ export default function AdminOrders() {
                         style={{
                           background: 'var(--bg2)', border: '1px solid var(--br)',
                           borderRadius: '6px', color: 'var(--text)', padding: '4px 6px',
-                          fontSize: '11px', cursor: 'pointer', minWidth: '100px'
+                          fontSize: '11px', cursor: updating === o.id ? 'not-allowed' : 'pointer',
+                          minWidth: '100px', opacity: updating === o.id ? 0.5 : 1,
                         }}>
                         <option value="pending">⏳ Pending</option>
                         <option value="in_progress">⚡ In Progress</option>
@@ -226,13 +305,19 @@ export default function AdminOrders() {
                     <td>
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                         {o.status !== 'cancelled' && o.status !== 'completed' && (
-                          <button onClick={() => refundOrder(o)} disabled={updating === o.id}
+                          <button
+                            onClick={() => refundOrder(o)}
+                            disabled={updating === o.id}
                             style={{
-                              padding: '4px 8px', borderRadius: '6px', cursor: 'pointer',
-                              border: '1px solid rgba(255,50,80,.3)', background: 'rgba(255,50,80,.1)',
-                              color: '#ff6b6b', fontSize: '10px', whiteSpace: 'nowrap'
+                              padding: '4px 8px', borderRadius: '6px',
+                              cursor: updating === o.id ? 'not-allowed' : 'pointer',
+                              border: '1px solid rgba(255,50,80,.3)',
+                              background: updating === o.id ? 'rgba(100,100,100,.15)' : 'rgba(255,50,80,.1)',
+                              color: updating === o.id ? 'var(--text3)' : '#ff6b6b',
+                              fontSize: '10px', whiteSpace: 'nowrap',
+                              opacity: updating === o.id ? 0.5 : 1,
                             }}>
-                            💸 Refund
+                            {updating === o.id ? '⏳' : '💸 Refund'}
                           </button>
                         )}
                         {o.refill_requested && (
@@ -248,11 +333,24 @@ export default function AdminOrders() {
             </table>
           </div>
 
+          {/* ── FIX: Pagination controls ── */}
           {totalPages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '16px', flexWrap: 'wrap' }}>
-              <button className="btn bgh bsm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← Prev</button>
-              <span style={{ padding: '6px 12px', fontSize: '12px', color: 'var(--text2)' }}>Page {page} / {totalPages}</span>
-              <button className="btn bgh bsm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next →</button>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                className="btn bgh bsm"
+                onClick={() => handlePageChange(Math.max(1, page - 1))}
+                disabled={page === 1}>
+                ← Prev
+              </button>
+              <span style={{ padding: '6px 12px', fontSize: '12px', color: 'var(--text2)' }}>
+                Page {page} / {totalPages} &nbsp;·&nbsp; {totalCount} total orders
+              </span>
+              <button
+                className="btn bgh bsm"
+                onClick={() => handlePageChange(Math.min(totalPages, page + 1))}
+                disabled={page === totalPages}>
+                Next →
+              </button>
             </div>
           )}
         </>
