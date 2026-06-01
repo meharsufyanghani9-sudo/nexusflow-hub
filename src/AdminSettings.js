@@ -19,7 +19,6 @@ export default function AdminSettings() {
     bulk_discount_min_qty: '1000',
     announcement: '',
     announcement_active: 'false',
-    api_markup_percent: '0',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -173,27 +172,6 @@ export default function AdminSettings() {
             fontSize:'11px', color:'var(--neon)'
           }}>
             🎉 Buyers get {settings.bulk_discount_percent}% off when ordering {parseInt(settings.bulk_discount_min_qty).toLocaleString()}+ quantity
-          </div>
-        )}
-      </div>
-
-      {/* API Price Markup */}
-      <div className="st">💹 API Service Price Markup</div>
-      <div className="card" style={{ padding:'18px', marginBottom:'16px', borderColor:'rgba(0,212,255,.25)' }}>
-        <div style={{ fontSize:'12px', color:'var(--text3)', marginBottom:'12px', lineHeight:1.6 }}>
-          Add a percentage markup to all API-imported services. When you import services from providers (JAP, SMMRaja, etc.), their prices will be shown to buyers with this markup added on top.
-          <br /><br />
-          Example: If a service costs <strong style={{color:'var(--gold)'}}>$1.00</strong> from provider and you set <strong style={{color:'var(--neon)'}}>20%</strong>, buyers see <strong style={{color:'var(--green)'}}>$1.20</strong>.
-        </div>
-        <Field label="Markup % on API Services (0 = no change)" k="api_markup_percent" placeholder="0" type="number" />
-        {settings.api_markup_percent && parseFloat(settings.api_markup_percent) > 0 && (
-          <div style={{
-            marginTop:'10px', padding:'10px 12px', borderRadius:'6px',
-            background:'rgba(0,212,255,.06)', border:'1px solid rgba(0,212,255,.2)',
-            fontSize:'11px', color:'var(--neon)'
-          }}>
-            💹 API services will be shown at <strong>{settings.api_markup_percent}%</strong> above provider price.
-            A $1.00 service → buyer sees ${(1 * (1 + parseFloat(settings.api_markup_percent)/100)).toFixed(2)}
           </div>
         )}
       </div>
