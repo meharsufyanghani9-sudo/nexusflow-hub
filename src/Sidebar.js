@@ -26,7 +26,6 @@ const menus = {
     { ic: '🏠', lb: 'Dashboard', id: 'dashboard' },
     { ic: '📦', lb: 'Manage Orders', id: 'adminorders' },
     { ic: '🛍', lb: 'Manage Services', id: 'adminservices' },
-    { ic: '🏷', lb: 'Manage Filters', id: 'adminfilters' },
     { ic: '✅', lb: 'Deposits', id: 'deposits' },
     { ic: '💸', lb: 'Withdrawals', id: 'withdrawals' },
     { ic: '👥', lb: 'All Users', id: 'users' },
