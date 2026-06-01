@@ -35,17 +35,7 @@ export function CurrencyProvider({ children }) {
   const format = (usdAmount) => {
     const amt = parseFloat(usdAmount) || 0;
     const converted = amt * parseFloat(currency.rate || 1);
-    // Always show 2 decimals if amount is less than 1, else 0 for non-USD
-    let decimals;
-    if (['USD','EUR','GBP'].includes(currency.code)) {
-      decimals = 2;
-    } else if (converted > 0 && converted < 1) {
-      decimals = 2; // show paisa e.g. Rs0.50
-    } else if (converted >= 1 && converted < 10) {
-      decimals = 1; // show e.g. Rs3.5
-    } else {
-      decimals = 0; // Rs40
-    }
+    const decimals = ['USD','EUR','GBP'].includes(currency.code) ? 2 : 0;
     return `${currency.symbol}${converted.toFixed(decimals)}`;
   };
 
