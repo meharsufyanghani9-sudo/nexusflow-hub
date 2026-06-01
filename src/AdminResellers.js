@@ -1,245 +1,233 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { supabase } from './supabase';
-import AdminCreateReseller from './AdminCreateReseller';
 
-export default function AdminResellers() {
-  const [resellers, setResellers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState(null);
-  const [services, setServices] = useState([]);
-  const [acting, setActing] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
-  // FIX: Added error state to replace removed console.error
-  const [loadError, setLoadError] = useState('');
-
-  const loadResellers = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, full_name, email, role, balance, is_active, referral_code, created_at')
-      .eq('role', 'reseller')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      // FIX: Removed console.error that leaked DB internals — show user-facing error instead
-      setLoadError('Failed to load resellers. Please try refreshing the page.');
-    }
-    if (data) setResellers(data);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    loadResellers();
-
-    const channel = supabase
-      .channel('admin-resellers-live')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'users' },
-        (payload) => {
-          if (payload.eventType === 'INSERT' && payload.new.role === 'reseller') {
-            setResellers(prev => [payload.new, ...prev]);
-          } else if (payload.eventType === 'UPDATE') {
-            if (payload.new.role === 'reseller') {
-              setResellers(prev => prev.map(r => r.id === payload.new.id ? payload.new : r));
-            } else {
-              // Role changed away from reseller — remove from list
-              setResellers(prev => prev.filter(r => r.id !== payload.new.id));
-            }
-          } else if (payload.eventType === 'DELETE') {
-            setResellers(prev => prev.filter(r => r.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [loadResellers]);
-
-  const loadServices = async () => {
-    const { data } = await supabase
-      .from('services')
-      .select('id, name, platform, price_per_1k, is_active')
-      .order('created_at', { ascending: false });
-    if (data) setServices(data);
-  };
-
-  const openReseller = async (r) => {
-    setSelected(r);
-    setMsg('');
-    await loadServices();
-  };
-
-  const toggleSuspend = async (r) => {
-    if (acting) return;
-    setActing(true);
-    const newStatus = !r.is_active;
-    const { error } = await supabase
-      .from('users')
-      .update({ is_active: newStatus })
-      .eq('id', r.id);
-    if (!error) {
-      setMsg(newStatus ? '✅ Reseller activated!' : '✅ Reseller suspended!');
-      loadResellers();
-    } else {
-      setMsg('❌ Failed to update status.');
-    }
-    setActing(false);
-    setTimeout(() => setMsg(''), 3000);
-  };
-
-  const addBalance = async (r, amount) => {
-    if (acting) return;
-    setActing(true);
-    const { data: freshUser } = await supabase
-      .from('users')
-      .select('balance')
-      .eq('id', r.id)
-      .single();
-
-    if (!freshUser) {
-      setMsg('❌ Could not fetch user balance.');
-      setActing(false);
-      return;
-    }
-
-    const newBal = parseFloat(freshUser.balance || 0) + parseFloat(amount);
-    await supabase.from('users').update({ balance: newBal }).eq('id', r.id);
-    await supabase.from('transactions').insert({
-      user_id: r.id,
-      type: 'deposit',
-      amount: parseFloat(amount),
-      description: `Admin added $${amount} to reseller`,
-      ref_id: 'ADJ-' + crypto.randomUUID().slice(0, 8).toUpperCase(),
-    });
-    setMsg(`✅ Added $${amount} to ${r.full_name}!`);
-    setActing(false);
-    loadResellers();
-    setTimeout(() => setMsg(''), 3000);
-  };
-
-  const filtered = resellers.filter(r => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      r.full_name?.toLowerCase().includes(q) ||
-      r.email?.toLowerCase().includes(q) ||
-      r.referral_code?.toLowerCase().includes(q)
-    );
+export default function AdminCreateReseller({ onClose, onCreated }) {
+  const [form, setForm] = useState({
+    full_name: '',
+    email: '',
+    password: '',
+    balance: '0',
   });
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const create = async () => {
+    setError(''); setSuccess('');
+    if (!form.full_name || !form.email || !form.password) {
+      setError('Fill all required fields'); return;
+    }
+    if (form.password.length < 8) {
+      setError('Password min 8 characters'); return;
+    }
+    setCreating(true);
+
+    try {
+      // ─── STEP 1: Save admin session BEFORE doing anything ───────────────
+      const { data: sessionData } = await supabase.auth.getSession();
+      const adminAccessToken = sessionData?.session?.access_token;
+      const adminRefreshToken = sessionData?.session?.refresh_token;
+      const adminUserId = sessionData?.session?.user?.id;
+
+      if (!adminAccessToken || !adminUserId) {
+        setError('Admin session expired. Please refresh the page and try again.');
+        setCreating(false);
+        return;
+      }
+
+      // ─── STEP 2: Create the new auth account ────────────────────────────
+      // Note: signUp() in Supabase client-side does NOT log out the current user
+      // if auto-confirm is enabled. But we save the session anyway to be safe.
+      const { data, error: signUpErr } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: { data: { full_name: form.full_name } }
+      });
+
+      if (signUpErr) {
+        setError(signUpErr.message);
+        setCreating(false);
+        return;
+      }
+
+      if (!data?.user) {
+        setError('Account creation failed. This email may already be registered.');
+        setCreating(false);
+        return;
+      }
+
+      const newUserId = data.user.id;
+      const newUserEmail = data.user.email;
+
+      // ─── STEP 3: Restore admin session immediately ───────────────────────
+      // This is critical — signUp may have switched the session to the new user
+      await supabase.auth.setSession({
+        access_token: adminAccessToken,
+        refresh_token: adminRefreshToken,
+      });
+
+      // ─── STEP 4: Wait for Supabase trigger to create the profile row ────
+      // The trigger in Supabase creates a row in public.users when a new
+      // auth user is created. We wait up to 5 seconds for it.
+      let profileExists = false;
+      for (let i = 0; i < 8; i++) {
+        await new Promise(r => setTimeout(r, 600));
+        const { data: checkRow } = await supabase
+          .from('users').select('id').eq('id', newUserId).single();
+        if (checkRow) { profileExists = true; break; }
+      }
+
+      // ─── STEP 5: Generate a referral code for the new reseller ──────────
+      const refCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+      if (profileExists) {
+        // ✅ FIX: The old code used .update().select() and checked `count`,
+        // but Supabase returns data rows not a count from .update().select().
+        // Now we do a simple update with all the correct fields.
+        const { error: updateErr } = await supabase
+          .from('users')
+          .update({
+            role: 'reseller',           // ✅ This is what was missing — role was not being set!
+            full_name: form.full_name,
+            balance: parseFloat(form.balance) || 0,
+            referral_code: refCode,
+            is_active: true,
+          })
+          .eq('id', newUserId);
+
+        if (updateErr) {
+          setError('Profile found but update failed: ' + updateErr.message +
+            '\n\nFix: Go to Users tab, find ' + form.email + ' and change role to Reseller manually.');
+          setCreating(false);
+          return;
+        }
+      } else {
+        // ✅ FIX: If the trigger didn't create the row in time, we insert it manually.
+        const { error: insertErr } = await supabase.from('users').upsert({
+          id: newUserId,
+          full_name: form.full_name,
+          email: newUserEmail,
+          role: 'reseller',             // ✅ Always set to 'reseller' here too
+          balance: parseFloat(form.balance) || 0,
+          is_active: true,
+          referral_code: refCode,
+        });
+
+        if (insertErr) {
+          setError('Account created in Auth but profile setup failed: ' + insertErr.message +
+            '\n\nFix: Go to Users tab, find ' + form.email + ' and change role to Reseller manually.');
+          setCreating(false);
+          return;
+        }
+      }
+
+      // ─── STEP 6: Add starting balance transaction if balance > 0 ────────
+      if (parseFloat(form.balance) > 0) {
+        await supabase.from('transactions').insert({
+          user_id: newUserId,
+          type: 'deposit',
+          amount: parseFloat(form.balance),
+          description: 'Starting balance by admin',
+          ref_id: 'ADM-' + Date.now(),
+        });
+      }
+
+      // ─── STEP 7: Final check — verify the role was actually saved ────────
+      const { data: finalCheck } = await supabase
+        .from('users').select('role').eq('id', newUserId).single();
+
+      if (finalCheck && finalCheck.role !== 'reseller') {
+        // One more attempt to force the role
+        await supabase.from('users').update({ role: 'reseller' }).eq('id', newUserId);
+      }
+
+      setSuccess(
+        `✅ Reseller account created successfully!\n\nEmail: ${form.email}\nPassword: ${form.password}\nStarting Balance: $${parseFloat(form.balance || 0).toFixed(2)}\n\nShare these login details with the reseller.`
+      );
+      setForm({ full_name: '', email: '', password: '', balance: '0' });
+      if (onCreated) onCreated();
+
+    } catch (e) {
+      setError('Unexpected error: ' + e.message);
+    }
+
+    setCreating(false);
+  };
+
+  const generatePassword = () => {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#';
+    let pw = '';
+    for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+    set('password', pw);
+  };
 
   return (
-    <div>
-      {/* Error banner */}
-      {loadError && (
-        <div style={{ padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', background: 'rgba(255,51,85,.08)', border: '1px solid rgba(255,51,85,.2)', fontSize: '12px', color: 'var(--danger)' }}>
-          ❌ {loadError}
-          <button onClick={loadResellers} style={{ marginLeft: '10px', background: 'none', border: 'none', color: 'var(--neon)', cursor: 'pointer', fontSize: '12px' }}>Retry</button>
+    <div className="mlay" onClick={e => e.target.classList.contains('mlay') && onClose()}>
+      <div className="mbox">
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div className="mttl">➕ Create Reseller Account</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
         </div>
-      )}
 
-      {msg && (
-        <div style={{ background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : 'rgba(255,51,85,.08)', border: `1px solid ${msg.startsWith('✅') ? 'rgba(0,255,136,.2)' : 'rgba(255,51,85,.2)'}`, borderRadius: '8px', padding: '12px', textAlign: 'center', color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)', fontWeight: 700, marginBottom: '16px', fontSize: '13px' }}>
-          {msg}
+        <div style={{ padding: '10px 12px', borderRadius: '7px', background: 'rgba(255,215,0,.06)', border: '1px solid rgba(255,215,0,.2)', fontSize: '11px', color: 'var(--warn)', marginBottom: '14px', lineHeight: 1.7 }}>
+          ⚠️ Admin creates this account. Share the email and password with the reseller directly. They login at your site URL.
         </div>
-      )}
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input className="srch-inp" style={{ flex: 1, minWidth: '200px' }}
-          placeholder="🔍 Search resellers..."
-          value={search} onChange={e => setSearch(e.target.value)} />
-        <button className="btn bp bsm" onClick={() => setShowCreate(true)}>+ Create Reseller</button>
-        <button className="btn bgh bsm" onClick={loadResellers}>🔄 Refresh</button>
-      </div>
+        {success && (
+          <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(0,255,136,.08)', border: '1px solid rgba(0,255,136,.2)', color: 'var(--green)', fontSize: '12px', marginBottom: '14px', lineHeight: 1.8, whiteSpace: 'pre-line', wordBreak: 'break-all' }}>
+            {success}
+          </div>
+        )}
 
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px' }}>
-        {filtered.length} reseller{filtered.length !== 1 ? 's' : ''} found
-      </div>
+        {error && (
+          <div style={{ padding: '10px', borderRadius: '7px', background: 'rgba(255,51,85,.08)', border: '1px solid rgba(255,51,85,.2)', color: 'var(--danger)', fontSize: '12px', marginBottom: '14px', whiteSpace: 'pre-line' }}>
+            {error}
+          </div>
+        )}
 
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>Loading resellers...</div>
-      ) : filtered.length === 0 ? (
-        <div className="empty">
-          <span className="empty-ic">🏪</span>
-          <div className="empty-tx">No resellers found</div>
-          <div className="empty-sb">Create a reseller account using the button above</div>
+        <div className="fi">
+          <label className="fl">Full Name *</label>
+          <input className="inp" placeholder="Reseller's full name"
+            value={form.full_name} onChange={e => set('full_name', e.target.value)} />
         </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {filtered.map(r => (
-            <div key={r.id} className="card" style={{ padding: '14px', opacity: r.is_active === false ? 0.6 : 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'linear-gradient(135deg,var(--gold2),var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '16px', color: '#000', flexShrink: 0 }}>
-                    {r.full_name?.[0]?.toUpperCase() || 'R'}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '2px' }}>
-                      {r.full_name}
-                      {r.is_active === false && (
-                        <span style={{ fontSize: '10px', color: 'var(--danger)', marginLeft: '8px', padding: '1px 6px', background: 'rgba(255,51,85,.12)', borderRadius: '8px', border: '1px solid rgba(255,51,85,.3)' }}>
-                          SUSPENDED
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '3px' }}>{r.email}</div>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      <span className="bdg b-reseller">reseller</span>
-                      <span className="bdg b-completed">💰 ${parseFloat(r.balance || 0).toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <button className="btn bgh bsm" onClick={() => openReseller(r)}>Manage →</button>
-                  <button
-                    onClick={() => toggleSuspend(r)}
-                    disabled={acting}
-                    style={{ padding: '5px 12px', borderRadius: '7px', cursor: 'pointer', fontSize: '11px', fontWeight: 600, border: 'none', background: r.is_active === false ? 'rgba(0,255,136,.15)' : 'rgba(255,51,85,.12)', color: r.is_active === false ? 'var(--green)' : 'var(--danger)' }}>
-                    {r.is_active === false ? '✅ Activate' : '🚫 Suspend'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {/* Manage Modal */}
-      {selected && (
-        <div className="mlay" onClick={e => e.target.classList.contains('mlay') && setSelected(null)}>
-          <div className="mbox">
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
-              <div className="mttl">Manage Reseller</div>
-              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-            <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>{selected.full_name}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '16px' }}>{selected.email}</div>
-            <div style={{ fontFamily: 'var(--fm)', fontSize: '20px', color: 'var(--green)', fontWeight: 700, marginBottom: '16px' }}>
-              Balance: ${parseFloat(selected.balance || 0).toFixed(2)}
-            </div>
-            <div className="st" style={{ marginBottom: '8px' }}>Add Balance</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '7px', marginBottom: '16px' }}>
-              {[5, 10, 25, 50, 100, 250, 500, 1000].map(amt => (
-                <button key={amt} className="btn bs bsm" onClick={() => addBalance(selected, amt)} disabled={acting}>+${amt}</button>
-              ))}
-            </div>
-            {msg && (
-              <div style={{ fontSize: '12px', textAlign: 'center', color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)', marginBottom: '10px' }}>{msg}</div>
-            )}
+        <div className="fi">
+          <label className="fl">Email Address *</label>
+          <input className="inp" type="email" placeholder="reseller@email.com"
+            value={form.email} onChange={e => set('email', e.target.value)} />
+        </div>
+
+        <div className="fi">
+          <label className="fl">Password *</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input className="inp" placeholder="Min 8 characters"
+              value={form.password} onChange={e => set('password', e.target.value)}
+              style={{ flex: 1 }} />
+            <button className="btn bgh bsm" onClick={generatePassword} style={{ flexShrink: 0 }}>
+              🎲 Generate
+            </button>
           </div>
         </div>
-      )}
 
-      {/* Create Reseller Modal */}
-      {showCreate && (
-        <AdminCreateReseller
-          onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); loadResellers(); }}
-        />
-      )}
+        <div className="fi">
+          <label className="fl">Starting Balance ($)</label>
+          <input className="inp" type="number" placeholder="0" min="0"
+            value={form.balance} onChange={e => set('balance', e.target.value)} />
+        </div>
+
+        <button className="btn bgd blg bw" onClick={create} disabled={creating}>
+          <span>{creating ? 'Creating Account... Please wait...' : '✦ Create Reseller Account'}</span>
+        </button>
+
+        {creating && (
+          <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text3)', marginTop: '10px', lineHeight: 1.7 }}>
+            ⏳ Setting up account and assigning reseller role...<br />
+            Please do not close this window.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
