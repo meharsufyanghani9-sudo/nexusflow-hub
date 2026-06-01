@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
 // Deposits are ALWAYS in PKR. This file does NOT use the currency switcher.
-// The amount the user enters is in PKR and is stored as-is.
 
 export default function Deposit({ user }) {
   const [settings, setSettings] = useState({});
@@ -56,9 +55,13 @@ export default function Deposit({ user }) {
   const minDeposit = parseInt(settings.min_deposit || 500);
 
   const handleFile = (e) => {
+    // FIX: Do not allow file changes while submitting
+    if (submitting) return;
     const f = e.target.files[0];
     if (!f) return;
     if (f.size > 5 * 1024 * 1024) { setError('File too large. Max 5MB.'); return; }
+    // Only allow image types
+    if (!f.type.startsWith('image/')) { setError('Only image files are allowed (JPG, PNG, etc.)'); return; }
     setFile(f);
     const reader = new FileReader();
     reader.onload = ev => setPreview(ev.target.result);
@@ -72,26 +75,42 @@ export default function Deposit({ user }) {
   };
 
   const submit = async () => {
+    // FIX: Block if already submitting
+    if (submitting) return;
     setError('');
+
+    // ── FIX: Strict amount validation ─────────────────────────────────────
     const numAmount = parseFloat(amount);
-    if (!amount || numAmount <= 0) { setError('Enter valid amount'); return; }
+    if (!amount || isNaN(numAmount)) { setError('Enter a valid amount'); return; }
+    if (numAmount <= 0) { setError('Amount must be greater than zero'); return; }
+    if (numAmount > 1000000) { setError('Amount is too large. Contact admin for large deposits.'); return; }
     if (!isBinance && numAmount < minDeposit) {
       setError(`Minimum deposit is PKR ${minDeposit}`);
       return;
     }
-    if (!txn) { setError('Enter transaction ID / reference number'); return; }
+    // ─────────────────────────────────────────────────────────────────────
+
+    if (!txn || txn.trim().length < 3) { setError('Enter a valid transaction ID / reference number'); return; }
     if (!file) { setError('Upload payment screenshot'); return; }
+
     setSubmitting(true);
     try {
       let screenshotUrl = null;
-      const fileName = `deposits/${user.id}_${Date.now()}.${file.name.split('.').pop()}`;
+      // FIX: Use crypto.randomUUID instead of Date.now to avoid filename collisions
+      const uniqueId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+      const ext = file.name.split('.').pop().toLowerCase().replace(/[^a-z]/g, '');
+      const fileName = `deposits/${user.id}_${uniqueId}.${ext}`;
+
       const { data: uploadData, error: uploadErr } = await supabase.storage
         .from('screenshots').upload(fileName, file);
       if (!uploadErr && uploadData) {
         const { data: urlData } = supabase.storage.from('screenshots').getPublicUrl(fileName);
         screenshotUrl = urlData.publicUrl;
       }
-      const depRef = 'DEP-' + Date.now();
+
+      // FIX: Use crypto.randomUUID for deposit ref — no timestamp collision risk
+      const depRef = 'DEP-' + crypto.randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
+
       const { error: depErr } = await supabase.from('deposits').insert({
         deposit_ref: depRef,
         user_id: user.id,
@@ -99,7 +118,7 @@ export default function Deposit({ user }) {
         user_email: user.email,
         method: selected.name,
         amount: numAmount,   // stored in PKR (or USDT for Binance)
-        txn_id: txn,
+        txn_id: txn.trim(),
         screenshot_url: screenshotUrl,
         status: 'pending',
       });
@@ -203,7 +222,7 @@ export default function Deposit({ user }) {
         <div className="fr" style={{ marginBottom: '13px' }}>
           <div className="fi" style={{ marginBottom: 0 }}>
             <label className="fl">Method</label>
-            <select className="sel" value={method} onChange={e => setMethod(e.target.value)}>
+            <select className="sel" value={method} onChange={e => setMethod(e.target.value)} disabled={submitting}>
               {methods.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
@@ -211,9 +230,16 @@ export default function Deposit({ user }) {
             <label className="fl">
               {isBinance ? 'Amount (USDT)' : 'Amount (PKR) 🇵🇰'}
             </label>
-            <input className="inp" type="number"
+            <input
+              className="inp"
+              type="number"
               placeholder={isBinance ? '5' : minDeposit.toString()}
-              value={amount} onChange={e => setAmount(e.target.value)} />
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              min={isBinance ? '1' : minDeposit}
+              max="1000000"
+              disabled={submitting}
+            />
             {!isBinance && (
               <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '4px' }}>
                 Min: PKR {minDeposit.toLocaleString()}
@@ -224,18 +250,33 @@ export default function Deposit({ user }) {
 
         <div className="fi">
           <label className="fl">Transaction ID / Reference Number</label>
-          <input className="inp" placeholder="EP2025XXXXXX or JC-XXXXXX"
-            value={txn} onChange={e => setTxn(e.target.value)} />
+          <input
+            className="inp"
+            placeholder="EP2025XXXXXX or JC-XXXXXX"
+            value={txn}
+            onChange={e => setTxn(e.target.value)}
+            disabled={submitting}
+          />
         </div>
 
         <div className="fi">
           <label className="fl">Upload Screenshot</label>
-          <div onClick={() => document.getElementById('depFile').click()} style={{
-            border: '2px dashed var(--br2)', borderRadius: '8px', padding: '24px',
-            textAlign: 'center', cursor: 'pointer', background: 'rgba(0,0,0,.2)'
-          }}>
-            <input type="file" id="depFile" accept="image/*"
-              style={{ display: 'none' }} onChange={handleFile} />
+          {/* FIX: onClick guard — cannot change file while submitting */}
+          <div
+            onClick={() => !submitting && document.getElementById('depFile').click()}
+            style={{
+              border: '2px dashed var(--br2)', borderRadius: '8px', padding: '24px',
+              textAlign: 'center', cursor: submitting ? 'not-allowed' : 'pointer',
+              background: 'rgba(0,0,0,.2)', opacity: submitting ? 0.6 : 1
+            }}>
+            <input
+              type="file"
+              id="depFile"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleFile}
+              disabled={submitting}
+            />
             {preview ? (
               <img src={preview} alt="proof" style={{ maxWidth: '100%', maxHeight: '160px', borderRadius: '6px', objectFit: 'contain' }} />
             ) : (
@@ -255,8 +296,13 @@ export default function Deposit({ user }) {
           </div>
         )}
 
-        <button className="btn bgd blg bw" onClick={submit} disabled={submitting}>
-          <span>{submitting ? 'Submitting...' : 'Submit for Review'}</span><span>✦</span>
+        {/* FIX: Button is fully disabled while submitting — no double-submit */}
+        <button
+          className="btn bgd blg bw"
+          onClick={submit}
+          disabled={submitting}
+          style={{ opacity: submitting ? 0.6 : 1, cursor: submitting ? 'not-allowed' : 'pointer' }}>
+          <span>{submitting ? 'Submitting... please wait' : 'Submit for Review'}</span><span>✦</span>
         </button>
 
         {settings.whatsapp && (
