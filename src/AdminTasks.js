@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ConfirmModal, useConfirm } from './ConfirmModal';
 import { supabase } from './supabase';
 
 export default function AdminTasks() {
   const [tasks, setTasks] = useState([]);
-
-  const { confirmState, confirm, handleConfirm, handleCancel } = useConfirm();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('tasks');
@@ -49,8 +46,7 @@ export default function AdminTasks() {
   };
 
   const deleteTask = async (id) => {
-    const ok = await confirm({ title:'Delete Task?', message:'This task will be permanently deleted.', confirmText:'Delete', confirmColor:'danger', icon:'🗑️' });
-    if (!ok) return;
+    if (!window.confirm('Delete this task?')) return;
     await supabase.from('tasks').delete().eq('id', id);
     loadAll();
   };
@@ -83,11 +79,6 @@ export default function AdminTasks() {
 
   return (
     <div>
-      <ConfirmModal
-        {...confirmState}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
-      />
       <div className="cgrid" style={{ marginBottom:'16px' }}>
         {[
           { ic:'📋', lb:'Total Tasks', vl:tasks.length, cl:'cn' },
