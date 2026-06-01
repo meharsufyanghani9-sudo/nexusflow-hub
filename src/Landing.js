@@ -1,22 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import LiveStats from './LiveStats';
-import { supabase } from './supabase';
 
 export default function Landing({ onAuth }) {
-  const [showReseller, setShowReseller] = useState(false);
-  const [whatsapp, setWhatsapp] = useState('');
-
-  useEffect(() => {
-    supabase.from('settings').select('key,value').eq('key', 'whatsapp').single()
-      .then(({ data }) => { if (data?.value) setWhatsapp(data.value); });
-  }, []);
-
   const features = [
     { ic: '🛒', tl: 'Buy SMM Services', tx: 'Instagram, TikTok, YouTube, Twitter and more. Real quality, fast delivery.' },
+    { ic: '🏪', tl: 'Sell & Earn', tx: 'List your services as a reseller. Set your price, earn on every order.' },
     { ic: '🔐', tl: 'Escrow Protected', tx: 'Funds held safely until order delivered. No risk for buyer or seller.' },
     { ic: '⚡', tl: 'Instant Processing', tx: 'Orders start within minutes. Real-time progress tracking.' },
     { ic: '💰', tl: 'Multi Payment', tx: 'Easypaisa, JazzCash, Binance USDT. Easy top-up anytime.' },
-    { ic: '🔄', tl: 'Refill Guarantee', tx: 'Selected services include a drop refill guarantee up to 30 days.' },
     { ic: '👑', tl: 'Admin Control', tx: 'Full admin panel. Manage users, approve deposits, control everything.' },
   ];
 
@@ -30,28 +21,10 @@ export default function Landing({ onAuth }) {
   ];
 
   const steps = [
-    { n: '01', tl: 'Create Account', tx: 'Sign up free in 2 minutes. Instant access to all services.' },
+    { n: '01', tl: 'Create Account', tx: 'Sign up free in 2 minutes. Get $5 welcome bonus instantly.' },
     { n: '02', tl: 'Add Funds', tx: 'Top up via Easypaisa, JazzCash or Binance USDT.' },
     { n: '03', tl: 'Place Order', tx: 'Choose service, enter your link, place order.' },
     { n: '04', tl: 'Track & Deliver', tx: 'Watch real-time progress. Delivery guaranteed.' },
-  ];
-
-  const buyerBenefits = [
-    { ic: '🛒', text: 'Access to 2,500+ SMM services across all platforms' },
-    { ic: '⚡', text: 'Instant order processing with real-time tracking' },
-    { ic: '💳', text: 'Easy deposit via Easypaisa, JazzCash & Crypto' },
-    { ic: '🔄', text: 'Refill guarantees on selected services' },
-    { ic: '🎧', text: '24/7 support via WhatsApp & Ticket system' },
-    { ic: '💰', text: 'Lowest prices in Pakistan market' },
-  ];
-
-  const resellerBenefits = [
-    { ic: '🏪', text: 'Get your own branded SMM panel to sell to clients' },
-    { ic: '💵', text: 'Set your own prices and earn on every order' },
-    { ic: '📊', text: 'Full earnings dashboard and transaction history' },
-    { ic: '🔌', text: 'API access to connect your own website or bot' },
-    { ic: '📦', text: 'Access to all 2,500+ services at wholesale rates' },
-    { ic: '👑', text: 'Priority support and dedicated reseller tools' },
   ];
 
   return (
@@ -104,7 +77,7 @@ export default function Landing({ onAuth }) {
           <button className="btn bp blg" onClick={() => onAuth('signup')}>
             🛒 Start Buying Free →
           </button>
-          <button className="btn bpu blg" onClick={() => setShowReseller(true)}>
+          <button className="btn bpu blg" onClick={() => onAuth('signup')}>
             🏪 Become a Reseller
           </button>
         </div>
@@ -112,7 +85,10 @@ export default function Landing({ onAuth }) {
 
       {/* PLATFORMS */}
       <section style={{ padding: '20px', maxWidth: '700px', margin: '0 auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '40px' }}>
+        <div style={{
+          display: 'flex', justifyContent: 'center', gap: '12px',
+          flexWrap: 'wrap', marginBottom: '40px'
+        }}>
           {platforms.map((p, i) => (
             <div key={i} style={{
               display: 'flex', alignItems: 'center', gap: '6px',
@@ -130,58 +106,6 @@ export default function Landing({ onAuth }) {
       {/* LIVE STATS */}
       <section style={{ padding: '0 20px', maxWidth: '900px', margin: '0 auto' }}>
         <LiveStats />
-      </section>
-
-      {/* BUYER vs RESELLER COMPARISON */}
-      <section style={{ padding: '20px', maxWidth: '900px', margin: '0 auto' }}>
-        <div style={{
-          fontFamily: 'var(--fd)', fontSize: '9px', letterSpacing: '4px',
-          color: 'var(--text3)', textTransform: 'uppercase', textAlign: 'center', marginBottom: '24px'
-        }}>
-          Choose Your Account Type
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '16px', marginBottom: '40px' }}>
-          {/* Buyer Card */}
-          <div className="card" style={{ padding: '24px', border: '1px solid rgba(0,212,255,.25)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '36px', marginBottom: '8px' }}>🛒</div>
-              <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 900, color: 'var(--neon)', marginBottom: '4px' }}>BUYER</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Buy SMM services for yourself</div>
-            </div>
-            {buyerBenefits.map((b, i) => (
-              <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'flex-start' }}>
-                <span style={{ fontSize: '14px', flexShrink: 0 }}>{b.ic}</span>
-                <span style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.5 }}>{b.text}</span>
-              </div>
-            ))}
-            <button className="btn bp bmd bw" style={{ marginTop: '16px', width: '100%' }} onClick={() => onAuth('signup')}>
-              Create Buyer Account →
-            </button>
-          </div>
-
-          {/* Reseller Card */}
-          <div className="card" style={{ padding: '24px', border: '1px solid rgba(255,180,0,.25)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '36px', marginBottom: '8px' }}>👑</div>
-              <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 900, color: 'var(--gold)', marginBottom: '4px' }}>RESELLER</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Sell services & earn money</div>
-            </div>
-            {resellerBenefits.map((b, i) => (
-              <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'flex-start' }}>
-                <span style={{ fontSize: '14px', flexShrink: 0 }}>{b.ic}</span>
-                <span style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.5 }}>{b.text}</span>
-              </div>
-            ))}
-            <div style={{ marginTop: '16px', padding: '10px 14px', borderRadius: '8px',
-              background: 'rgba(255,180,0,.08)', border: '1px solid rgba(255,180,0,.2)',
-              fontSize: '11px', color: 'var(--gold)', marginBottom: '10px', lineHeight: 1.6 }}>
-              ⚠️ Reseller accounts are created by admin only. Contact us to apply.
-            </div>
-            <button className="btn bgo bmd bw" style={{ width: '100%' }} onClick={() => setShowReseller(true)}>
-              👑 Apply to Become Reseller →
-            </button>
-          </div>
-        </div>
       </section>
 
       {/* FEATURES */}
@@ -256,79 +180,6 @@ export default function Landing({ onAuth }) {
       }}>
         © {new Date().getFullYear()} NexusFlow HUB · Multi-Vendor SMM Marketplace
       </footer>
-
-      {/* ─── RESELLER INFO MODAL ─── */}
-      {showReseller && (
-        <div className="mlay" onClick={e => e.target.classList.contains('mlay') && setShowReseller(false)}
-          style={{ zIndex: 9999 }}>
-          <div className="mbox" style={{ maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <div className="mttl">👑 Become a Reseller</div>
-              <button onClick={() => setShowReseller(false)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '8px' }}>👑</div>
-              <div style={{ fontFamily: 'var(--fd)', fontSize: '14px', color: 'var(--gold)', fontWeight: 800 }}>
-                NEXUSFLOW RESELLER PROGRAM
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
-                Start earning money by reselling SMM services
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--neon)', letterSpacing: '1.5px', marginBottom: '10px' }}>
-                WHAT YOU GET AS A RESELLER
-              </div>
-              {resellerBenefits.map((b, i) => (
-                <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '8px', alignItems: 'flex-start' }}>
-                  <span style={{ fontSize: '14px', flexShrink: 0 }}>{b.ic}</span>
-                  <span style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.5 }}>{b.text}</span>
-                </div>
-              ))}
-            </div>
-
-            <div style={{
-              padding: '14px', borderRadius: '10px', marginBottom: '16px',
-              background: 'rgba(255,180,0,.06)', border: '1px solid rgba(255,180,0,.2)'
-            }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gold)', marginBottom: '8px' }}>
-                ⚠️ HOW TO BECOME A RESELLER
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text2)', lineHeight: 1.8 }}>
-                Reseller accounts are <strong style={{ color: 'var(--gold)' }}>created by admin only</strong> — not through the normal signup page. To apply, contact our admin directly via WhatsApp. Share your name, email, and why you want to resell. Admin will review and create your reseller account within 24 hours.
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {whatsapp ? (
-                <a href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hi, I want to become a reseller on NexusFlow HUB. Please create a reseller account for me.')}`}
-                  target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                  <div style={{
-                    padding: '14px', borderRadius: '10px', textAlign: 'center',
-                    background: 'rgba(37,211,102,.1)', border: '1px solid rgba(37,211,102,.3)',
-                    color: '#25D366', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
-                  }}>
-                    💬 Contact Admin on WhatsApp →
-                  </div>
-                </a>
-              ) : (
-                <div style={{
-                  padding: '14px', borderRadius: '10px', textAlign: 'center',
-                  background: 'var(--gl)', border: '1px solid var(--br)',
-                  color: 'var(--text3)', fontSize: '12px'
-                }}>
-                  💬 Contact admin to get your reseller account
-                </div>
-              )}
-              <button className="btn bgh bmd" onClick={() => { setShowReseller(false); onAuth('signup'); }}>
-                Or Create a Buyer Account First
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
