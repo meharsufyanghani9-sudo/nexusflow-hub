@@ -22,10 +22,11 @@
 // This blocks attackers from using your server to reach internal addresses.
 const ALLOWED_HOSTS = [
   // Add your real provider domains below, one per line, like this:
-  // 'justanotherpanel.com',
-  // 'smmstone.com',
-  // 'peakerr.com',
-  // 'smmfollows.com',
+   'justanotherpanel.com',
+   'smmstone.com',
+   'peakerr.com',
+   'smmfollows.com',
+   'officialclicks.com',
 ];
 // ────────────────────────────────────────────────────────────────────────────
 
