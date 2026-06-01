@@ -9,29 +9,26 @@ const platforms = [
 const empty = {
   name: '', description: '', platform: 'instagram',
   price_per_1k: '', min_qty: 100, max_qty: 10000,
-  is_active: true, is_featured: false, has_refill: false, category: '',
+  is_active: true, is_featured: false, category: '',
   provider_id: '', provider_service_id: '', provider_api_url: '', provider_api_key: '',
 };
 
 export default function AdminServices() {
-  const [services, setServices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [form, setForm] = useState(empty);
-  const [editing, setEditing] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [search, setSearch] = useState('');
+  const [services, setServices]         = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [modal, setModal]               = useState(false);
+  const [form, setForm]                 = useState(empty);
+  const [editing, setEditing]           = useState(null);
+  const [saving, setSaving]             = useState(false);
+  const [msg, setMsg]                   = useState('');
+  const [search, setSearch]             = useState('');
   const [filterPlatform, setFilterPlatform] = useState('');
-
-  // ── Bulk selection state ──────────────────────────────────
-  const [selected, setSelected] = useState(new Set()); // Set of service IDs
-  const [bulkActing, setBulkActing] = useState(false);
+  const [selected, setSelected]         = useState(new Set());
+  const [bulkActing, setBulkActing]     = useState(false);
   const [showBulkMenu, setShowBulkMenu] = useState(false);
 
   useEffect(() => { loadServices(); }, []);
 
-  // Close bulk menu when clicking elsewhere
   useEffect(() => {
     const close = () => setShowBulkMenu(false);
     document.addEventListener('click', close);
@@ -40,33 +37,24 @@ export default function AdminServices() {
 
   const loadServices = async () => {
     setLoading(true);
-    // Loop past Supabase 1000-row limit to load all 2500+ services
-    let allData = [];
-    let from = 0;
-    const BATCH = 1000;
-    while (true) {
-      const { data, error } = await supabase
-        .from('services').select('*')
-        .order('created_at', { ascending: false })
-        .range(from, from + BATCH - 1);
-      if (error || !data || data.length === 0) break;
-      allData = [...allData, ...data];
-      if (data.length < BATCH) break;
-      from += BATCH;
-    }
-    setServices(allData);
+    // NOTE: Admin intentionally loads all columns including provider_api_key.
+    // This is admin-only and protected by role-based access in App.js.
+    // Buyers use public_services view (or select without sensitive cols) — see Marketplace.js.
+    const { data } = await supabase
+      .from('services')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) setServices(data);
     setLoading(false);
     setSelected(new Set());
   };
 
-  // ── Filtering ─────────────────────────────────────────────
   const filtered = services.filter(s => {
     const mSearch = !search || (s.name || '').toLowerCase().includes(search.toLowerCase());
-    const mPlat = !filterPlatform || s.platform === filterPlatform;
+    const mPlat   = !filterPlatform || s.platform === filterPlatform;
     return mSearch && mPlat;
   });
 
-  // ── Checkbox helpers ──────────────────────────────────────
   const allFilteredSelected = filtered.length > 0 && filtered.every(s => selected.has(s.id));
   const someSelected = selected.size > 0;
 
@@ -80,14 +68,12 @@ export default function AdminServices() {
 
   const toggleAll = () => {
     if (allFilteredSelected) {
-      // deselect all filtered
       setSelected(prev => {
         const next = new Set(prev);
         filtered.forEach(s => next.delete(s.id));
         return next;
       });
     } else {
-      // select all filtered
       setSelected(prev => {
         const next = new Set(prev);
         filtered.forEach(s => next.add(s.id));
@@ -96,15 +82,13 @@ export default function AdminServices() {
     }
   };
 
-  // ── Bulk Actions ──────────────────────────────────────────
   const selectedIds = [...selected];
 
   const bulkActivate = async () => {
     setBulkActing(true);
     await supabase.from('services').update({ is_active: true }).in('id', selectedIds);
     setMsg(`✅ ${selectedIds.length} service(s) activated.`);
-    loadServices();
-    setBulkActing(false);
+    loadServices(); setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
@@ -112,8 +96,7 @@ export default function AdminServices() {
     setBulkActing(true);
     await supabase.from('services').update({ is_active: false }).in('id', selectedIds);
     setMsg(`✅ ${selectedIds.length} service(s) deactivated.`);
-    loadServices();
-    setBulkActing(false);
+    loadServices(); setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
@@ -121,8 +104,7 @@ export default function AdminServices() {
     setBulkActing(true);
     await supabase.from('services').update({ is_featured: true }).in('id', selectedIds);
     setMsg(`⭐ ${selectedIds.length} service(s) marked as Featured.`);
-    loadServices();
-    setBulkActing(false);
+    loadServices(); setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
@@ -130,8 +112,7 @@ export default function AdminServices() {
     setBulkActing(true);
     await supabase.from('services').update({ is_featured: false }).in('id', selectedIds);
     setMsg(`✅ ${selectedIds.length} service(s) removed from Featured.`);
-    loadServices();
-    setBulkActing(false);
+    loadServices(); setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
@@ -140,57 +121,97 @@ export default function AdminServices() {
     setBulkActing(true);
     await supabase.from('services').delete().in('id', selectedIds);
     setMsg(`🗑 ${selectedIds.length} service(s) deleted.`);
-    loadServices();
-    setBulkActing(false);
+    loadServices(); setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
-  // ── Individual Actions ────────────────────────────────────
-  const openAdd = () => { setForm(empty); setEditing(null); setMsg(''); setModal(true); };
+  const openAdd = () => {
+    setForm(empty); setEditing(null); setMsg(''); setModal(true);
+  };
 
   const openEdit = (s) => {
     setForm({
       name: s.name || '', description: s.description || '',
       platform: s.platform || 'instagram', price_per_1k: s.price_per_1k || '',
       min_qty: s.min_qty || 100, max_qty: s.max_qty || 10000,
-      is_active: s.is_active !== false, is_featured: s.is_featured || false, has_refill: s.has_refill || false,
+      is_active: s.is_active !== false, is_featured: s.is_featured || false,
       category: s.category || '', provider_id: s.provider_id || '',
       provider_service_id: s.provider_service_id || '',
       provider_api_url: s.provider_api_url || '',
       provider_api_key: s.provider_api_key || '',
     });
-    setEditing(s.id);
-    setMsg('');
-    setModal(true);
+    setEditing(s.id); setMsg(''); setModal(true);
   };
 
   const saveService = async () => {
-    if (!form.name || !form.price_per_1k) { setMsg('❌ Name and price are required.'); return; }
+    // ── FIX: Full validation before saving ───────────────────────────────
+    if (!form.name || !form.name.trim()) {
+      setMsg('❌ Service name is required.'); return;
+    }
+    const price = parseFloat(form.price_per_1k);
+    if (!form.price_per_1k || isNaN(price) || price <= 0) {
+      setMsg('❌ Price must be a positive number.'); return;
+    }
+    if (price > 10000) {
+      setMsg('❌ Price per 1000 seems too high. Max allowed: $10,000.'); return;
+    }
+    const minQty = parseInt(form.min_qty);
+    const maxQty = parseInt(form.max_qty);
+    if (isNaN(minQty) || minQty <= 0) {
+      setMsg('❌ Min quantity must be a positive number.'); return;
+    }
+    if (isNaN(maxQty) || maxQty <= minQty) {
+      setMsg('❌ Max quantity must be greater than min quantity.'); return;
+    }
+    // If provider URL is filled, validate its format
+    if (form.provider_api_url && form.provider_api_url.trim()) {
+      try {
+        const parsed = new URL(form.provider_api_url.trim());
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          setMsg('❌ Provider API URL must start with https://'); return;
+        }
+      } catch {
+        setMsg('❌ Provider API URL is not a valid URL (e.g. https://provider.com/api/v2)'); return;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     setSaving(true);
-    // FIX: removed updated_at and status — those columns don't exist in the schema
     const payload = {
-      name: form.name, description: form.description,
-      platform: form.platform, price_per_1k: parseFloat(form.price_per_1k),
-      min_qty: parseInt(form.min_qty), max_qty: parseInt(form.max_qty),
-      is_active: form.is_active, is_featured: form.is_featured, has_refill: form.has_refill,
-      category: form.category, provider_id: form.provider_id,
-      provider_service_id: form.provider_service_id,
-      provider_api_url: form.provider_api_url,
-      provider_api_key: form.provider_api_key,
+      name:                form.name.trim(),
+      description:         form.description.trim(),
+      platform:            form.platform,
+      price_per_1k:        price,
+      min_qty:             minQty,
+      max_qty:             maxQty,
+      is_active:           form.is_active,
+      is_featured:         form.is_featured,
+      category:            form.category.trim(),
+      provider_id:         form.provider_id.trim(),
+      provider_service_id: form.provider_service_id.trim(),
+      provider_api_url:    form.provider_api_url.trim(),
+      provider_api_key:    form.provider_api_key.trim(),
     };
+
     let error;
     if (editing) {
       ({ error } = await supabase.from('services').update(payload).eq('id', editing));
     } else {
       ({ error } = await supabase.from('services').insert(payload));
     }
-    if (error) { setMsg('❌ Error: ' + error.message); }
-    else { setMsg(editing ? '✅ Service updated!' : '✅ Service added!'); setModal(false); loadServices(); }
+
+    if (error) {
+      setMsg('❌ Error: ' + error.message);
+    } else {
+      setMsg(editing ? '✅ Service updated!' : '✅ Service added!');
+      setModal(false);
+      loadServices();
+    }
     setSaving(false);
     setTimeout(() => setMsg(''), 4000);
   };
 
-  const toggleActive = async (s) => {
+  const toggleActive   = async (s) => {
     await supabase.from('services').update({ is_active: !s.is_active }).eq('id', s.id);
     loadServices();
   };
@@ -209,13 +230,12 @@ export default function AdminServices() {
   };
 
   const stats = {
-    total: services.length,
-    active: services.filter(s => s.is_active).length,
+    total:    services.length,
+    active:   services.filter(s => s.is_active).length,
     featured: services.filter(s => s.is_featured).length,
     inactive: services.filter(s => !s.is_active).length,
   };
 
-  // ── Checkbox style ────────────────────────────────────────
   const Checkbox = ({ checked, onChange, indeterminate }) => (
     <div
       onClick={e => { e.stopPropagation(); onChange(); }}
@@ -245,10 +265,10 @@ export default function AdminServices() {
       {/* Stats */}
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '🛍', lb: 'Total Services', vl: stats.total, cl: 'cn' },
-          { ic: '✅', lb: 'Active', vl: stats.active, cl: 'cg' },
-          { ic: '⭐', lb: 'Featured', vl: stats.featured, cl: 'cgo' },
-          { ic: '❌', lb: 'Inactive', vl: stats.inactive, cl: 'cd' },
+          { ic: '🛍', lb: 'Total Services', vl: stats.total,    cl: 'cn' },
+          { ic: '✅', lb: 'Active',          vl: stats.active,   cl: 'cg' },
+          { ic: '⭐', lb: 'Featured',        vl: stats.featured, cl: 'cgo' },
+          { ic: '❌', lb: 'Inactive',         vl: stats.inactive, cl: 'cd' },
         ].map((s, i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -276,7 +296,7 @@ export default function AdminServices() {
         <button className="btn bp bmd" onClick={openAdd}>+ Add Service</button>
       </div>
 
-      {/* ── Bulk Action Bar — shows only when items selected ── */}
+      {/* Bulk Action Bar */}
       {someSelected && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
@@ -287,30 +307,12 @@ export default function AdminServices() {
             {selected.size} selected
           </span>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <button onClick={bulkActivate} disabled={bulkActing} style={{
-              padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
-              fontWeight: 700, border: '1px solid rgba(0,255,136,.3)', background: 'rgba(0,255,136,.1)', color: 'var(--green)'
-            }}>✅ Activate</button>
-            <button onClick={bulkDeactivate} disabled={bulkActing} style={{
-              padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
-              fontWeight: 700, border: '1px solid rgba(255,50,80,.3)', background: 'rgba(255,50,80,.1)', color: '#ff6b6b'
-            }}>⏸ Deactivate</button>
-            <button onClick={bulkFeature} disabled={bulkActing} style={{
-              padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
-              fontWeight: 700, border: '1px solid rgba(255,200,0,.3)', background: 'rgba(255,200,0,.1)', color: 'var(--gold)'
-            }}>⭐ Feature</button>
-            <button onClick={bulkUnfeature} disabled={bulkActing} style={{
-              padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
-              fontWeight: 700, border: '1px solid var(--br)', background: 'var(--gl)', color: 'var(--text3)'
-            }}>☆ Unfeature</button>
-            <button onClick={bulkDelete} disabled={bulkActing} style={{
-              padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
-              fontWeight: 700, border: '1px solid rgba(255,50,80,.5)', background: 'rgba(255,50,80,.15)', color: '#ff4455'
-            }}>🗑 Delete All</button>
-            <button onClick={() => setSelected(new Set())} style={{
-              padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
-              border: '1px solid var(--br)', background: 'transparent', color: 'var(--text3)'
-            }}>✕ Clear</button>
+            <button onClick={bulkActivate}   disabled={bulkActing} style={{ padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, border: '1px solid rgba(0,255,136,.3)',  background: 'rgba(0,255,136,.1)',  color: 'var(--green)'  }}>✅ Activate</button>
+            <button onClick={bulkDeactivate} disabled={bulkActing} style={{ padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, border: '1px solid rgba(255,50,80,.3)',  background: 'rgba(255,50,80,.1)',  color: '#ff6b6b'       }}>⏸ Deactivate</button>
+            <button onClick={bulkFeature}    disabled={bulkActing} style={{ padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, border: '1px solid rgba(255,200,0,.3)', background: 'rgba(255,200,0,.1)', color: 'var(--gold)'   }}>⭐ Feature</button>
+            <button onClick={bulkUnfeature}  disabled={bulkActing} style={{ padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, border: '1px solid var(--br)',          background: 'var(--gl)',          color: 'var(--text3)'  }}>☆ Unfeature</button>
+            <button onClick={bulkDelete}     disabled={bulkActing} style={{ padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, border: '1px solid rgba(255,50,80,.5)',  background: 'rgba(255,50,80,.15)', color: '#ff4455'       }}>🗑 Delete All</button>
+            <button onClick={() => setSelected(new Set())} style={{ padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', border: '1px solid var(--br)', background: 'transparent', color: 'var(--text3)' }}>✕ Clear</button>
           </div>
           {bulkActing && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Working...</span>}
         </div>
@@ -329,7 +331,6 @@ export default function AdminServices() {
           <table>
             <thead>
               <tr>
-                {/* Select All checkbox */}
                 <th style={{ width: '36px', textAlign: 'center' }}>
                   <Checkbox
                     checked={allFilteredSelected}
@@ -350,12 +351,8 @@ export default function AdminServices() {
             <tbody>
               {filtered.map(s => (
                 <tr key={s.id} style={{ background: selected.has(s.id) ? 'rgba(0,212,255,.05)' : undefined }}>
-                  {/* Row checkbox */}
                   <td style={{ textAlign: 'center' }}>
-                    <Checkbox
-                      checked={selected.has(s.id)}
-                      onChange={() => toggleOne(s.id)}
-                    />
+                    <Checkbox checked={selected.has(s.id)} onChange={() => toggleOne(s.id)} />
                   </td>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: '13px', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
@@ -387,13 +384,13 @@ export default function AdminServices() {
                   </td>
                   <td style={{ fontSize: '10px', color: 'var(--text3)' }}>
                     {s.provider_api_url ? <span style={{ color: 'var(--green)' }}>🔌 API Auto</span>
-                      : s.provider_id ? <span style={{ color: 'var(--gold)' }}>📦 {s.provider_id}</span>
+                      : s.provider_id    ? <span style={{ color: 'var(--gold)' }}>📦 {s.provider_id}</span>
                       : <span>Manual</span>}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: '4px' }}>
                       <button className="btn bgh bsm" onClick={() => openEdit(s)}>✏️</button>
-                      <button className="btn bd bsm" onClick={() => deleteService(s.id)}>🗑</button>
+                      <button className="btn bd bsm"  onClick={() => deleteService(s.id)}>🗑</button>
                     </div>
                   </td>
                 </tr>
@@ -403,7 +400,7 @@ export default function AdminServices() {
         </div>
       )}
 
-      {/* ── Add / Edit Modal ── */}
+      {/* Add / Edit Modal */}
       {modal && (
         <div className="mlay" onClick={() => setModal(false)}>
           <div className="mbox" onClick={e => e.stopPropagation()}
@@ -426,24 +423,28 @@ export default function AdminServices() {
 
             <div className="fi">
               <label className="fl">Service Name *</label>
-              <input className="inp" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              <input className="inp" value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="e.g. Instagram Followers – Real & Fast" />
             </div>
             <div className="fi">
               <label className="fl">Description</label>
-              <input className="inp" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              <input className="inp" value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 placeholder="Short description shown to buyers..." />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <div className="fi">
                 <label className="fl">Platform *</label>
-                <select className="sel" value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}>
+                <select className="sel" value={form.platform}
+                  onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}>
                   {platforms.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div className="fi">
                 <label className="fl">Category</label>
-                <input className="inp" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                <input className="inp" value={form.category}
+                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
                   placeholder="e.g. Followers, Likes..." />
               </div>
             </div>
@@ -452,17 +453,18 @@ export default function AdminServices() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
               <div className="fi">
                 <label className="fl">Price / 1000 ($) *</label>
-                <input className="inp" type="number" step="0.001" value={form.price_per_1k}
-                  onChange={e => setForm(f => ({ ...f, price_per_1k: e.target.value }))} placeholder="1.50" />
+                <input className="inp" type="number" step="0.001" min="0.001" value={form.price_per_1k}
+                  onChange={e => setForm(f => ({ ...f, price_per_1k: e.target.value }))}
+                  placeholder="1.50" />
               </div>
               <div className="fi">
                 <label className="fl">Min Qty</label>
-                <input className="inp" type="number" value={form.min_qty}
+                <input className="inp" type="number" min="1" value={form.min_qty}
                   onChange={e => setForm(f => ({ ...f, min_qty: e.target.value }))} />
               </div>
               <div className="fi">
                 <label className="fl">Max Qty</label>
-                <input className="inp" type="number" value={form.max_qty}
+                <input className="inp" type="number" min="1" value={form.max_qty}
                   onChange={e => setForm(f => ({ ...f, max_qty: e.target.value }))} />
               </div>
             </div>
@@ -470,9 +472,8 @@ export default function AdminServices() {
             <div style={{ fontSize: '9px', color: 'var(--text3)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '10px', marginTop: '6px' }}>Visibility</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
               {[
-                { key: 'is_active', label: '✅ Active', desc: 'Visible to buyers on marketplace' },
-                { key: 'is_featured', label: '⭐ Featured', desc: 'Shown first with gold highlight' },
-                { key: 'has_refill', label: '🔁 Refill', desc: 'User can request refill after completion' },
+                { key: 'is_active',   label: '✅ Active',   desc: 'Visible to buyers on marketplace' },
+                { key: 'is_featured', label: '⭐ Featured', desc: 'Shown first with gold highlight'   },
               ].map(opt => (
                 <div key={opt.key} className="card" style={{ padding: '12px', cursor: 'pointer' }}
                   onClick={() => setForm(f => ({ ...f, [opt.key]: !f[opt.key] }))}>
