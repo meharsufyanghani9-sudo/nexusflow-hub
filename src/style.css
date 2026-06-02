@@ -690,3 +690,6 @@ body.light .mkt-featured{
   background:linear-gradient(135deg,rgba(255,184,0,.08),rgba(255,255,255,.9))!important;
   border-color:rgba(200,140,0,.35)!important;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
+.mkt-grid-2col{display:grid;grid-template-columns:repeat(2,1fr)!important;gap:12px;}
+input,select,textarea{font-size:16px!important;}
