@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './style.css';
 import { supabase } from './supabase';
 import Landing from './Landing';
@@ -52,11 +52,11 @@ const pageTitles = {
 };
 
 const buyerNav = [
-  { ic:'🏠', lb:'Home',    id:'dashboard'   },
-  { ic:'🛒', lb:'Market',  id:'marketplace' },
-  { ic:'📦', lb:'Orders',  id:'orders'      },
-  { ic:'💳', lb:'Funds',   id:'deposit'     },
-  { ic:'👤', lb:'Profile', id:'profile'     },
+  { ic:'🏠', lb:'Home',   id:'dashboard'  },
+  { ic:'🛒', lb:'Market', id:'marketplace'},
+  { ic:'📦', lb:'Orders', id:'orders'     },
+  { ic:'💳', lb:'Funds',  id:'deposit'    },
+  { ic:'👤', lb:'Profile',id:'profile'    },
 ];
 const resellerNav = [
   { ic:'🏠', lb:'Home',     id:'dashboard'    },
@@ -68,18 +68,16 @@ const resellerNav = [
 const adminNav = [
   { ic:'🏠', lb:'Home',     id:'dashboard'    },
   { ic:'📦', lb:'Orders',   id:'adminorders'  },
-  { ic:'🛍', lb:'Services', id:'adminservices' },
+  { ic:'🛍', lb:'Services', id:'adminservices'},
   { ic:'✅', lb:'Deposits', id:'deposits'     },
   { ic:'👤', lb:'Profile',  id:'profile'      },
 ];
 
 async function generateUniqueUsername(baseName) {
   const base = baseName.toLowerCase().replace(/[^a-z0-9]/g,'') || 'user';
-  let candidate = base;
-  let attempt = 0;
+  let candidate = base, attempt = 0;
   while (true) {
-    const { data } = await supabase
-      .from('users').select('id').eq('username', candidate).maybeSingle();
+    const { data } = await supabase.from('users').select('id').eq('username', candidate).maybeSingle();
     if (!data) return candidate;
     attempt++;
     candidate = base + attempt;
@@ -87,35 +85,14 @@ async function generateUniqueUsername(baseName) {
 }
 
 export default function App() {
-  const [screen,      setScreen]      = useState('loading');
-  const [authTab,     setAuthTab]     = useState('login');
-  const [user,        setUser]        = useState(null);
-  const [page,        setPage]        = useState('dashboard');
-  const [sbOpen,      setSbOpen]      = useState(false);
-  const [showCurrency,setShowCurrency]= useState(false);
-  const [darkMode,    setDarkMode]    = useState(true);
-
-  // ── History navigation: back button on mobile goes to previous page ─────────
-  // instead of closing the whole app or jumping to home.
-  const navigateTo = (newPage) => {
-    if (newPage === page) return;
-    // Push current page to browser history before switching
-    window.history.pushState({ page: newPage }, '', window.location.pathname);
-    setPage(newPage);
-  };
-
-  useEffect(() => {
-    // Handle browser back button — restore previous page
-    const handlePopState = (e) => {
-      if (e.state && e.state.page) {
-        setPage(e.state.page);
-      } else {
-        setPage('dashboard');
-      }
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  const [screen, setScreen]         = useState('loading');
+  const [authTab, setAuthTab]       = useState('login');
+  const [user, setUser]             = useState(null);
+  const [page, setPage]             = useState('dashboard');
+  const [pageHistory, setPageHistory] = useState(['dashboard']); // history stack
+  const [sbOpen, setSbOpen]         = useState(false);
+  const [showCurrency, setShowCurrency] = useState(false);
+  const [darkMode, setDarkMode]     = useState(true);
 
   useEffect(() => {
     supabase.from('settings').select('key').limit(1);
@@ -125,7 +102,6 @@ export default function App() {
       if (session?.user) {
         const { data: profile } = await supabase
           .from('users').select('*').eq('id', session.user.id).maybeSingle();
-
         if (profile && profile.is_active !== false) {
           let username = profile.username;
           if (!username) {
@@ -133,12 +109,9 @@ export default function App() {
             await supabase.from('users').update({ username }).eq('id', session.user.id);
           }
           setUser({
-            id:            session.user.id,
-            name:          profile.full_name,
-            email:         profile.email,
-            username,
-            role:          profile.role,
-            balance:       parseFloat(profile.balance || 0),
+            id: session.user.id, name: profile.full_name,
+            email: profile.email, username, role: profile.role,
+            balance: parseFloat(profile.balance || 0),
             referral_code: profile.referral_code,
           });
           setScreen('app');
@@ -149,30 +122,55 @@ export default function App() {
     };
     restoreSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_OUT') {
-          setUser(null); setScreen('landing'); setPage('dashboard');
-        }
-        if (event === 'PASSWORD_RECOVERY') { setScreen('auth'); setAuthTab('login'); }
-      }
-    );
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') { setUser(null); setScreen('landing'); setPage('dashboard'); setPageHistory(['dashboard']); }
+      if (event === 'PASSWORD_RECOVERY') { setScreen('auth'); setAuthTab('login'); }
+    });
     return () => subscription.unsubscribe();
   }, []);
 
+  // ── Browser back button support ──────────────────────────
+  useEffect(() => {
+    const handlePop = () => {
+      setPageHistory(prev => {
+        if (prev.length > 1) {
+          const next = [...prev];
+          next.pop();
+          const target = next[next.length - 1];
+          setPage(target);
+          return next;
+        }
+        // Already at root — if on app, go to dashboard; otherwise let browser handle it
+        if (screen === 'app') {
+          setPage('dashboard');
+          return ['dashboard'];
+        }
+        return prev;
+      });
+    };
+
+    // Push a dummy state so popstate fires on first back press
+    window.history.pushState({ panel: true }, '');
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, [screen]);
+
+  const navigate = useCallback((newPage) => {
+    if (newPage === page) return;
+    // Push state so back button works
+    window.history.pushState({ panel: true, page: newPage }, '');
+    setPageHistory(prev => [...prev.slice(-19), newPage]); // keep last 20
+    setPage(newPage);
+    setSbOpen(false);
+  }, [page]);
+
   const logout = async () => {
     await supabase.auth.signOut();
-    setUser(null); setScreen('landing'); setPage('dashboard');
+    setUser(null); setScreen('landing'); setPage('dashboard'); setPageHistory(['dashboard']);
   };
 
   const handleAuth  = (tab) => { setAuthTab(tab); setScreen('auth'); };
-  const handleLogin = (u)   => {
-    setUser(u);
-    setPage('dashboard');
-    setScreen('app');
-    // Seed history so back button works from first page
-    window.history.replaceState({ page:'dashboard' }, '', window.location.pathname);
-  };
+  const handleLogin = (u)   => { setUser(u); setPage('dashboard'); setPageHistory(['dashboard']); setScreen('app'); };
 
   const toggleTheme = () => {
     const next = !darkMode;
@@ -192,58 +190,56 @@ export default function App() {
   if (screen === 'auth')    return <Auth onLogin={handleLogin} defaultTab={authTab} />;
   if (!user)                return <Auth onLogin={handleLogin} defaultTab="login" />;
 
-  const mobileNav = user.role === 'admin'    ? adminNav
-                  : user.role === 'reseller' ? resellerNav
-                  : buyerNav;
+  const mobileNav = user.role === 'admin' ? adminNav
+    : user.role === 'reseller' ? resellerNav
+    : buyerNav;
 
   const renderPage = () => {
     if (user.role === 'buyer') {
-      if (page === 'dashboard')    return <BuyerDashboard user={user} onNav={navigateTo} />;
-      if (page === 'marketplace')  return <Marketplace    user={user} onNav={navigateTo} />;
-      if (page === 'deposit')      return <Deposit        user={user} />;
-      if (page === 'orders')       return <Orders         user={user} />;
-      if (page === 'transactions') return <Transactions   user={user} />;
-      if (page === 'referral')     return <Referral       user={user} />;
-      if (page === 'tasks')        return <Tasks          user={user} />;
-      if (page === 'panelapi')     return <PanelApi       user={user} />;
-      if (page === 'buyersupport') return <SupportTicket  user={user} />;
-      if (page === 'profile')      return <Profile        user={user} onLogout={logout} />;
+      if (page === 'dashboard')   return <BuyerDashboard user={user} onNav={navigate} />;
+      if (page === 'marketplace') return <Marketplace user={user} onNav={navigate} />;
+      if (page === 'deposit')     return <Deposit user={user} />;
+      if (page === 'orders')      return <Orders user={user} onNav={navigate} />;
+      if (page === 'transactions')return <Transactions user={user} />;
+      if (page === 'referral')    return <Referral user={user} />;
+      if (page === 'tasks')       return <Tasks user={user} />;
+      if (page === 'panelapi')    return <PanelApi user={user} />;
+      if (page === 'buyersupport')return <SupportTicket user={user} />;
+      if (page === 'profile')     return <Profile user={user} onLogout={logout} />;
     }
     if (user.role === 'admin') {
-      if (page === 'dashboard')     return <AdminDashboard  user={user} onNav={navigateTo} />;
-      if (page === 'adminorders')   return <AdminOrders />;
-      if (page === 'adminservices') return <AdminServices />;
-      if (page === 'deposits')      return <AdminDeposits />;
-      if (page === 'users')         return <AdminUsers />;
-      if (page === 'settings')      return <AdminSettings />;
-      if (page === 'disputes')      return <AdminDisputes />;
-      if (page === 'api')           return <AdminApiImport />;
-      if (page === 'withdrawals')   return <AdminWithdrawals />;
-      if (page === 'resellers')     return <AdminResellers />;
-      if (page === 'admintasks')    return <AdminTasks />;
-      if (page === 'adminreferral') return <AdminReferral />;
-      if (page === 'support')       return <AdminSupport />;
-      if (page === 'currencies')    return <AdminCurrencies />;
-      if (page === 'massemail')     return <AdminMassEmail />;
-      if (page === 'profile')       return <Profile user={user} onLogout={logout} />;
+      if (page === 'dashboard')    return <AdminDashboard user={user} onNav={navigate} />;
+      if (page === 'adminorders')  return <AdminOrders />;
+      if (page === 'adminservices')return <AdminServices />;
+      if (page === 'deposits')     return <AdminDeposits />;
+      if (page === 'users')        return <AdminUsers />;
+      if (page === 'settings')     return <AdminSettings />;
+      if (page === 'disputes')     return <AdminDisputes />;
+      if (page === 'api')          return <AdminApiImport />;
+      if (page === 'withdrawals')  return <AdminWithdrawals />;
+      if (page === 'resellers')    return <AdminResellers />;
+      if (page === 'admintasks')   return <AdminTasks />;
+      if (page === 'adminreferral')return <AdminReferral />;
+      if (page === 'support')      return <AdminSupport />;
+      if (page === 'currencies')   return <AdminCurrencies />;
+      if (page === 'massemail')    return <AdminMassEmail />;
+      if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
     }
     if (user.role === 'reseller') {
-      if (page === 'dashboard')    return <ResellerDashboard user={user} onNav={navigateTo} />;
-      if (page === 'services')     return <ResellerServices  user={user} />;
-      if (page === 'earnings')     return <ResellerEarnings  user={user} />;
-      if (page === 'transactions') return <Transactions      user={user} />;
-      if (page === 'deposit')      return <Deposit           user={user} />;
-      if (page === 'panelapi')     return <PanelApi          user={user} />;
-      if (page === 'profile')      return <Profile           user={user} onLogout={logout} />;
+      if (page === 'dashboard')    return <ResellerDashboard user={user} onNav={navigate} />;
+      if (page === 'services')     return <ResellerServices user={user} />;
+      if (page === 'earnings')     return <ResellerEarnings user={user} />;
+      if (page === 'transactions') return <Transactions user={user} />;
+      if (page === 'deposit')      return <Deposit user={user} />;
+      if (page === 'panelapi')     return <PanelApi user={user} />;
+      if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
     }
     return (
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'50vh', gap:'12px', textAlign:'center', padding:'20px' }}>
         <div style={{ fontSize:'40px' }}>🚧</div>
-        <div style={{ fontFamily:'var(--fd)', fontSize:'14px', color:'var(--neon)', letterSpacing:'2px' }}>
-          {pageTitles[page] || page}
-        </div>
+        <div style={{ fontFamily:'var(--fd)', fontSize:'14px', color:'var(--neon)', letterSpacing:'2px' }}>{pageTitles[page] || page}</div>
         <div style={{ fontSize:'12px', color:'var(--text3)' }}>Coming soon</div>
-        <button className="btn bgh bsm" onClick={() => navigateTo('dashboard')}>← Back</button>
+        <button className="btn bgh bsm" onClick={() => navigate('dashboard')}>← Back</button>
       </div>
     );
   };
@@ -251,10 +247,10 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="gbg" />
-      <Sidebar user={user} page={page} onNav={navigateTo} open={sbOpen} onClose={() => setSbOpen(false)} />
+      <Sidebar user={user} page={page} onNav={navigate} open={sbOpen} onClose={() => setSbOpen(false)} />
       <main className="main">
         <Topbar
-          user={user} page={page} onNav={navigateTo} onLogout={logout}
+          user={user} page={page} onNav={navigate} onLogout={logout}
           onCurrency={() => setShowCurrency(true)} onTheme={toggleTheme}
           darkMode={darkMode} setSbOpen={setSbOpen}
         />
@@ -264,9 +260,7 @@ export default function App() {
       </main>
       <nav className="mobnav">
         {mobileNav.map(item => (
-          <div key={item.id}
-            className={`mni ${page === item.id ? 'on' : ''}`}
-            onClick={() => navigateTo(item.id)}>
+          <div key={item.id} className={`mni ${page === item.id ? 'on' : ''}`} onClick={() => navigate(item.id)}>
             <span className="mni-ic">{item.ic}</span>
             <span>{item.lb}</span>
           </div>
