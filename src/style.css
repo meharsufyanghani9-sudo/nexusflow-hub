@@ -690,6 +690,45 @@ body.light .mkt-featured{
   background:linear-gradient(135deg,rgba(255,184,0,.08),rgba(255,255,255,.9))!important;
   border-color:rgba(200,140,0,.35)!important;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
-.mkt-grid-2col{display:grid;grid-template-columns:repeat(2,1fr)!important;gap:12px;}
-input,select,textarea{font-size:16px!important;}
+/* ═══ ADDITIONAL FIXES — COMPREHENSIVE UPDATE ═══ */
+
+/* Platform icon grid for marketplace */
+@media(max-width:380px){
+  /* 4-col platform grid stays 4-col, just smaller */
+  .page-content > div > div[style*="grid-template-columns: 'repeat(4"] {
+    grid-template-columns: repeat(4,1fr);
+  }
+}
+
+/* Support chat bubbles */
+.chat-thread { display:flex; flex-direction:column; gap:10px; }
+
+/* Mbox with proper padding for modals like Manage Reseller */
+.mbox { padding: 20px 18px; }
+@media(max-width:480px){ .mbox { padding: 16px 14px !important; } }
+
+/* Scrollable pill rows (service type filters) */
+.pills-scroll {
+  display:flex; gap:6px; flex-wrap:nowrap; overflow-x:auto;
+  padding-bottom:4px; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+}
+.pills-scroll::-webkit-scrollbar { display:none; }
+
+/* Orders table mobile min-width */
+@media(max-width:480px){
+  .tblw table { min-width: 400px; }
+}
+
+/* Announcement banner */
+.announce-bar {
+  background: linear-gradient(90deg,rgba(0,212,255,.12),rgba(123,47,255,.12));
+  border: 1px solid rgba(0,212,255,.25);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+
+/* Featured cards are same size as regular — fix oversizing */
+.mkt-featured { position:relative; }
+.mkt-featured:not(.mkt-card-hero) { /* no extra sizing */ }
