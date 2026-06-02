@@ -4,54 +4,57 @@ import { useCurrency } from './CurrencyContext';
 
 export default function BuyerDashboard({ user, onNav }) {
   const { format } = useCurrency();
-  const [orders, setOrders] = useState([]);
-  const [balance, setBalance] = useState(user.balance || 0);
-  const [loading, setLoading] = useState(true);
+  const [orders, setOrders]           = useState([]);
+  const [balance, setBalance]         = useState(user.balance || 0);
+  const [loading, setLoading]         = useState(true);
   const [announcement, setAnnouncement] = useState('');
   const [showAnnouncement, setShowAnnouncement] = useState(true);
 
   useEffect(() => { loadData(); }, []);
 
+  // Live balance refresh
+  useEffect(() => {
+    const ch = supabase.channel('buyer-dash-live')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${user.id}` },
+        (payload) => { if (payload.new?.balance !== undefined) setBalance(parseFloat(payload.new.balance)); })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [user.id]);
+
   const loadData = async () => {
     setLoading(true);
-
-    // Load balance, recent orders, and announcement at the same time
     const [
       { data: profile },
       { data: ord },
       { data: settingsData },
     ] = await Promise.all([
       supabase.from('users').select('balance').eq('id', user.id).single(),
-      supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending:false }).limit(5),
+      supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('settings').select('*'),
     ]);
 
     if (profile) setBalance(parseFloat(profile.balance) || 0);
     if (ord) setOrders(ord);
 
-    // Show announcement banner if admin set one
     if (settingsData) {
       const s = {};
       settingsData.forEach(row => { s[row.key] = row.value; });
-      if (s.announcement_active === 'true' && s.announcement) {
-        setAnnouncement(s.announcement);
-      }
+      if (s.announcement_active === 'true' && s.announcement) setAnnouncement(s.announcement);
     }
-
     setLoading(false);
   };
 
   const stats = {
-    total: orders.length,
-    completed: orders.filter(o => o.status==='completed').length,
-    progress: orders.filter(o => o.status==='in_progress').length,
-    spent: orders.reduce((a,b) => a + parseFloat(b.cost||0), 0),
+    total:     orders.length,
+    completed: orders.filter(o => o.status === 'completed').length,
+    progress:  orders.filter(o => o.status === 'in_progress').length,
+    spent:     orders.reduce((a,b) => a + parseFloat(b.cost||0), 0),
   };
 
   const badgeClass = (s) => {
-    if (s==='completed') return 'b-completed';
-    if (s==='in_progress') return 'b-processing';
-    if (s==='pending') return 'b-pending';
+    if (s === 'completed')  return 'b-completed';
+    if (s === 'in_progress') return 'b-processing';
+    if (s === 'pending')    return 'b-pending';
     return 'b-rejected';
   };
 
@@ -93,10 +96,10 @@ export default function BuyerDashboard({ user, onNav }) {
       {/* Stats */}
       <div className="cgrid">
         {[
-          { ic:'📦', lb:'Total Orders', vl: stats.total, cl:'cn' },
-          { ic:'✅', lb:'Completed', vl: stats.completed, cl:'cg' },
-          { ic:'⚡', lb:'In Progress', vl: stats.progress, cl:'cn' },
-          { ic:'💰', lb:'Total Spent', vl: format(stats.spent), cl:'cgo' },
+          { ic:'📦', lb:'Total Orders', vl:stats.total,           cl:'cn'  },
+          { ic:'✅', lb:'Completed',    vl:stats.completed,        cl:'cg'  },
+          { ic:'⚡', lb:'In Progress',  vl:stats.progress,         cl:'cn'  },
+          { ic:'💰', lb:'Total Spent',  vl:format(stats.spent),    cl:'cgo' },
         ].map((s,i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -110,17 +113,15 @@ export default function BuyerDashboard({ user, onNav }) {
       <div className="st">Quick Actions</div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))', gap:'10px', marginBottom:'20px' }}>
         {[
-          { ic:'🛒', lb:'Buy Services', sub:'Instagram, TikTok...', fn:'marketplace' },
-          { ic:'💳', lb:'Add Funds', sub:'Easypaisa, Jazz, Crypto', fn:'deposit' },
-          { ic:'📦', lb:'My Orders', sub:'Track all orders', fn:'orders' },
-          { ic:'🎁', lb:'Referral', sub:'Invite & earn', fn:'referral' },
-          { ic:'⚡', lb:'Earn Tasks', sub:'Complete & earn', fn:'tasks' },
-          { ic:'💬', lb:'Support', sub:'Get help from admin', fn:'buyersupport' },
+          { ic:'🛒', lb:'Buy Services',  sub:'Instagram, TikTok...',    fn:'marketplace'  },
+          { ic:'💳', lb:'Add Funds',     sub:'Easypaisa, Jazz, Crypto', fn:'deposit'      },
+          { ic:'📦', lb:'My Orders',     sub:'Track all orders',        fn:'orders'       },
+          { ic:'🎁', lb:'Referral',      sub:'Invite & earn',           fn:'referral'     },
+          { ic:'⚡', lb:'Earn Tasks',    sub:'Complete & earn',         fn:'tasks'        },
+          { ic:'💬', lb:'Support',       sub:'Get help from admin',     fn:'buyersupport' },
         ].map((a,i) => (
           <div key={i} className="card" style={{ padding:'14px', cursor:'pointer', transition:'all .2s' }}
-            onClick={() => onNav(a.fn)}
-            onMouseOver={e => e.currentTarget.style.borderColor='var(--br2)'}
-            onMouseOut={e => e.currentTarget.style.borderColor=''}>
+            onClick={() => onNav(a.fn)}>
             <div style={{ fontSize:'22px', marginBottom:'8px' }}>{a.ic}</div>
             <div style={{ fontSize:'12px', fontWeight:700, color:'var(--text)', marginBottom:'3px' }}>{a.lb}</div>
             <div style={{ fontSize:'10px', color:'var(--text3)' }}>{a.sub}</div>
@@ -136,26 +137,31 @@ export default function BuyerDashboard({ user, onNav }) {
         <div className="tblw">
           <table>
             <thead>
-              <tr><th>#ID</th><th>Service</th><th>Qty</th><th>Cost</th><th>Status</th><th>Date</th></tr>
+              <tr><th>Service</th><th>Qty</th><th>Cost</th><th>Status</th><th>Date</th></tr>
             </thead>
             <tbody>
               {orders.length === 0 ? (
-                <tr><td colSpan="6" style={{ textAlign:'center', padding:'32px', color:'var(--text3)' }}>
+                <tr><td colSpan="5" style={{ textAlign:'center', padding:'32px', color:'var(--text3)' }}>
                   No orders yet — <span style={{ color:'var(--neon)', cursor:'pointer' }} onClick={() => onNav('marketplace')}>browse marketplace →</span>
                 </td></tr>
               ) : orders.map(o => (
                 <tr key={o.id}>
-                  <td style={{ fontFamily:'var(--fm)', color:'var(--neon)', fontSize:'11px' }}>{o.order_ref || o.id?.slice(0,8)}</td>
                   <td style={{ fontWeight:600, maxWidth:'120px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{o.service_name}</td>
                   <td style={{ fontFamily:'var(--fm)' }}>{o.quantity?.toLocaleString()}</td>
                   <td style={{ color:'var(--gold)', fontFamily:'var(--fm)' }}>{format(parseFloat(o.cost||0))}</td>
                   <td><span className={`bdg ${badgeClass(o.status)}`}>{o.status?.replace('_',' ')}</span></td>
-                  <td style={{ color:'var(--text3)', fontSize:'10px' }}>{new Date(o.created_at).toLocaleDateString()}</td>
+                  <td style={{ color:'var(--text3)', fontSize:'10px' }}>{new Date(o.created_at).toLocaleDateString('en-GB')}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {orders.length > 0 && (
+        <button className="btn bgh bsm" style={{ marginTop:'12px', width:'100%' }} onClick={() => onNav('orders')}>
+          View All Orders →
+        </button>
       )}
     </div>
   );
