@@ -9,7 +9,7 @@ const platforms = [
 const empty = {
   name: '', description: '', platform: 'instagram',
   price_per_1k: '', min_qty: 100, max_qty: 10000,
-  is_active: true, is_featured: false, category: '',
+  is_active: true, is_featured: false, has_refill: false, category: '',
   provider_id: '', provider_service_id: '', provider_api_url: '', provider_api_key: '',
 };
 
@@ -40,10 +40,23 @@ export default function AdminServices() {
 
   const loadServices = async () => {
     setLoading(true);
-    const { data } = await supabase.from('services').select('*').order('created_at', { ascending: false });
-    if (data) setServices(data);
+    // Loop past Supabase 1000-row limit to load all 2500+ services
+    let allData = [];
+    let from = 0;
+    const BATCH = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('services').select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + BATCH - 1);
+      if (error || !data || data.length === 0) break;
+      allData = [...allData, ...data];
+      if (data.length < BATCH) break;
+      from += BATCH;
+    }
+    setServices(allData);
     setLoading(false);
-    setSelected(new Set()); // clear selection on reload
+    setSelected(new Set());
   };
 
   // ── Filtering ─────────────────────────────────────────────
@@ -140,7 +153,7 @@ export default function AdminServices() {
       name: s.name || '', description: s.description || '',
       platform: s.platform || 'instagram', price_per_1k: s.price_per_1k || '',
       min_qty: s.min_qty || 100, max_qty: s.max_qty || 10000,
-      is_active: s.is_active !== false, is_featured: s.is_featured || false,
+      is_active: s.is_active !== false, is_featured: s.is_featured || false, has_refill: s.has_refill || false,
       category: s.category || '', provider_id: s.provider_id || '',
       provider_service_id: s.provider_service_id || '',
       provider_api_url: s.provider_api_url || '',
@@ -159,7 +172,7 @@ export default function AdminServices() {
       name: form.name, description: form.description,
       platform: form.platform, price_per_1k: parseFloat(form.price_per_1k),
       min_qty: parseInt(form.min_qty), max_qty: parseInt(form.max_qty),
-      is_active: form.is_active, is_featured: form.is_featured,
+      is_active: form.is_active, is_featured: form.is_featured, has_refill: form.has_refill,
       category: form.category, provider_id: form.provider_id,
       provider_service_id: form.provider_service_id,
       provider_api_url: form.provider_api_url,
@@ -459,6 +472,7 @@ export default function AdminServices() {
               {[
                 { key: 'is_active', label: '✅ Active', desc: 'Visible to buyers on marketplace' },
                 { key: 'is_featured', label: '⭐ Featured', desc: 'Shown first with gold highlight' },
+                { key: 'has_refill', label: '🔁 Refill', desc: 'User can request refill after completion' },
               ].map(opt => (
                 <div key={opt.key} className="card" style={{ padding: '12px', cursor: 'pointer' }}
                   onClick={() => setForm(f => ({ ...f, [opt.key]: !f[opt.key] }))}>
