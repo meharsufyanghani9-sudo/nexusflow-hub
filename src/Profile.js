@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from './supabase';
+import { useCurrency } from './CurrencyContext';
 
 export default function Profile({ user, onLogout }) {
   const [curPw, setCurPw] = useState('');
@@ -8,6 +9,7 @@ export default function Profile({ user, onLogout }) {
   const [pwMsg, setPwMsg] = useState('');
   const [pwOk, setPwOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const { format, currency } = useCurrency();
 
   const changePassword = async () => {
     setPwMsg(''); setPwOk(false);
@@ -34,6 +36,9 @@ export default function Profile({ user, onLogout }) {
     setTimeout(() => { setPwMsg(''); setPwOk(false); }, 4000);
   };
 
+  // Balance shown in current selected currency
+  const balanceDisplay = format(user.balance);
+
   return (
     <div style={{ maxWidth: '500px' }}>
       <div className="bhr mb20" style={{ textAlign: 'center' }}>
@@ -47,7 +52,6 @@ export default function Profile({ user, onLogout }) {
           {user.name[0].toUpperCase()}
         </div>
         <div style={{ fontFamily: 'var(--fd)', fontSize: '20px', fontWeight: 800, marginBottom: '4px' }}>{user.name}</div>
-        {/* ── FIX: Username is now shown on the profile page ── */}
         {user.username && (
           <div style={{ fontSize: '13px', color: 'var(--neon)', fontFamily: 'var(--fm)', marginBottom: '6px' }}>
             @{user.username}
@@ -56,7 +60,8 @@ export default function Profile({ user, onLogout }) {
         <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '10px' }}>{user.email}</div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
           <span className={`bdg b-${user.role}`}>{user.role}</span>
-          <span className="bdg b-completed">Balance: ${user.balance.toFixed(2)}</span>
+          {/* Balance shown in user's selected currency */}
+          <span className="bdg b-completed">Balance: {balanceDisplay}</span>
         </div>
       </div>
 
@@ -67,16 +72,17 @@ export default function Profile({ user, onLogout }) {
           { lb: 'Username',       val: user.username ? '@' + user.username : '—' },
           { lb: 'Email Address',  val: user.email },
           { lb: 'Account Type',   val: user.role.toUpperCase() },
-          { lb: 'Wallet Balance', val: `$${user.balance.toFixed(2)}` },
+          { lb: 'Wallet Balance', val: balanceDisplay },
+          { lb: 'Currency',       val: `${currency.symbol} ${currency.code} — ${currency.name}` },
         ].map((r, i) => (
           <div key={i} style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '10px 0', borderBottom: i < 4 ? '1px solid var(--br)' : 'none'
+            padding: '10px 0', borderBottom: i < 5 ? '1px solid var(--br)' : 'none'
           }}>
             <span style={{ fontSize: '11px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>{r.lb}</span>
             <span style={{
               fontSize: '13px', fontWeight: 600,
-              color: r.lb === 'Wallet Balance' ? 'var(--green)' : r.lb === 'Username' ? 'var(--neon)' : 'var(--text)',
+              color: r.lb === 'Wallet Balance' ? 'var(--green)' : r.lb === 'Username' ? 'var(--neon)' : r.lb === 'Currency' ? 'var(--gold)' : 'var(--text)',
               fontFamily: r.lb === 'Username' ? 'var(--fm)' : 'inherit'
             }}>{r.val}</span>
           </div>
