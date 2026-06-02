@@ -1,33 +1,17 @@
-// api/proxy.js — Vercel Serverless Function
-// Proxies requests to external SMM provider APIs to bypass CORS restrictions.
-// Deploy this project on Vercel and this function runs automatically.
-
 export default async function handler(req, res) {
   // Allow all origins
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // Support both POST body and GET query params
-  const body = req.method === 'POST' ? req.body : req.query;
-  const { url, key, action, service, link, quantity, order } = body || {};
+  const { url, key, action, service, link, quantity, order } = req.body || req.query;
 
   if (!url || !key) {
-    return res.status(400).json({ error: 'Missing required fields: url and key' });
-  }
-
-  // Basic URL validation — must be http/https
-  try {
-    const parsed = new URL(url);
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return res.status(400).json({ error: 'Invalid URL protocol' });
-    }
-  } catch {
-    return res.status(400).json({ error: 'Invalid URL format' });
+    return res.status(400).json({ error: 'Missing url or key' });
   }
 
   try {
