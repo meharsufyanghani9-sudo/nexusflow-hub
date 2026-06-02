@@ -17,11 +17,30 @@ export default function AdminOrders() {
 
   const loadOrders = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('orders')
-      .select('*, users(full_name, email)')
-      .order('created_at', { ascending: false });
-    if (data) setOrders(data);
+    // Batch loop past Supabase 1000-row limit
+    let allOrders = [];
+    let from = 0;
+    const BATCH = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('orders').select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + BATCH - 1);
+      if (error || !data || data.length === 0) break;
+      allOrders = [...allOrders, ...data];
+      if (data.length < BATCH) break;
+      from += BATCH;
+    }
+    // Enrich with user info (avoids FK join issues)
+    if (allOrders.length > 0) {
+      const userIds = [...new Set(allOrders.map(o => o.user_id).filter(Boolean))];
+      const { data: users } = await supabase
+        .from('users').select('id,full_name,email').in('id', userIds);
+      const userMap = {};
+      (users || []).forEach(u => { userMap[u.id] = u; });
+      allOrders = allOrders.map(o => ({ ...o, users: userMap[o.user_id] || null }));
+    }
+    setOrders(allOrders);
     setLoading(false);
   };
 
