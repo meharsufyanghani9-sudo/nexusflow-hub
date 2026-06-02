@@ -36,45 +36,45 @@ import SupportTicket from './SupportTicket';
 import CurrencySwitcher from './CurrencySwitcher';
 
 const pageTitles = {
-  dashboard: 'Dashboard', marketplace: 'Marketplace',
-  orders: 'My Orders', deposit: 'Add Funds',
-  transactions: 'Transactions', referral: 'Referral & Earn',
-  tasks: 'Earn Tasks', profile: 'My Profile',
-  panelapi: 'API Access', services: 'Services',
-  earnings: 'Earnings', deposits: 'Manage Deposits',
-  withdrawals: 'Withdrawals', users: 'All Users',
-  resellers: 'Resellers', api: 'API Import',
-  disputes: 'Disputes', settings: 'Settings',
-  admintasks: 'Manage Tasks', adminreferral: 'Referral Settings',
-  support: 'Support Tickets', currencies: 'Currency Rates',
-  massemail: 'Mass Email', buyersupport: 'Support',
-  adminorders: 'Manage Orders', adminservices: 'Manage Services',
+  dashboard:'Dashboard', marketplace:'Marketplace',
+  orders:'My Orders', deposit:'Add Funds',
+  transactions:'Transactions', referral:'Referral & Earn',
+  tasks:'Earn Tasks', profile:'My Profile',
+  panelapi:'API Access', services:'Services',
+  earnings:'Earnings', deposits:'Manage Deposits',
+  withdrawals:'Withdrawals', users:'All Users',
+  resellers:'Resellers', api:'API Import',
+  disputes:'Disputes', settings:'Settings',
+  admintasks:'Manage Tasks', adminreferral:'Referral Settings',
+  support:'Support Tickets', currencies:'Currency Rates',
+  massemail:'Mass Email', buyersupport:'Support',
+  adminorders:'Manage Orders', adminservices:'Manage Services',
 };
 
 const buyerNav = [
-  { ic: '🏠', lb: 'Home',    id: 'dashboard'  },
-  { ic: '🛒', lb: 'Market',  id: 'marketplace' },
-  { ic: '📦', lb: 'Orders',  id: 'orders'      },
-  { ic: '💳', lb: 'Funds',   id: 'deposit'     },
-  { ic: '👤', lb: 'Profile', id: 'profile'     },
+  { ic:'🏠', lb:'Home',    id:'dashboard'   },
+  { ic:'🛒', lb:'Market',  id:'marketplace' },
+  { ic:'📦', lb:'Orders',  id:'orders'      },
+  { ic:'💳', lb:'Funds',   id:'deposit'     },
+  { ic:'👤', lb:'Profile', id:'profile'     },
 ];
 const resellerNav = [
-  { ic: '🏠', lb: 'Home',     id: 'dashboard'    },
-  { ic: '🏪', lb: 'Services', id: 'services'     },
-  { ic: '💵', lb: 'Earnings', id: 'earnings'     },
-  { ic: '📊', lb: 'Txns',     id: 'transactions' },
-  { ic: '👤', lb: 'Profile',  id: 'profile'      },
+  { ic:'🏠', lb:'Home',     id:'dashboard'    },
+  { ic:'🏪', lb:'Services', id:'services'     },
+  { ic:'💵', lb:'Earnings', id:'earnings'     },
+  { ic:'📊', lb:'Txns',     id:'transactions' },
+  { ic:'👤', lb:'Profile',  id:'profile'      },
 ];
 const adminNav = [
-  { ic: '🏠', lb: 'Home',     id: 'dashboard'    },
-  { ic: '📦', lb: 'Orders',   id: 'adminorders'  },
-  { ic: '🛍', lb: 'Services', id: 'adminservices' },
-  { ic: '✅', lb: 'Deposits', id: 'deposits'     },
-  { ic: '👤', lb: 'Profile',  id: 'profile'      },
+  { ic:'🏠', lb:'Home',     id:'dashboard'    },
+  { ic:'📦', lb:'Orders',   id:'adminorders'  },
+  { ic:'🛍', lb:'Services', id:'adminservices' },
+  { ic:'✅', lb:'Deposits', id:'deposits'     },
+  { ic:'👤', lb:'Profile',  id:'profile'      },
 ];
 
 async function generateUniqueUsername(baseName) {
-  const base = baseName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+  const base = baseName.toLowerCase().replace(/[^a-z0-9]/g,'') || 'user';
   let candidate = base;
   let attempt = 0;
   while (true) {
@@ -87,17 +87,38 @@ async function generateUniqueUsername(baseName) {
 }
 
 export default function App() {
-  const [screen, setScreen]         = useState('loading');
-  const [authTab, setAuthTab]       = useState('login');
-  const [user, setUser]             = useState(null);
-  const [page, setPage]             = useState('dashboard');
-  const [sbOpen, setSbOpen]         = useState(false);
-  const [showCurrency, setShowCurrency] = useState(false);
-  const [darkMode, setDarkMode]     = useState(true);
+  const [screen,      setScreen]      = useState('loading');
+  const [authTab,     setAuthTab]     = useState('login');
+  const [user,        setUser]        = useState(null);
+  const [page,        setPage]        = useState('dashboard');
+  const [sbOpen,      setSbOpen]      = useState(false);
+  const [showCurrency,setShowCurrency]= useState(false);
+  const [darkMode,    setDarkMode]    = useState(true);
+
+  // ── History navigation: back button on mobile goes to previous page ─────────
+  // instead of closing the whole app or jumping to home.
+  const navigateTo = (newPage) => {
+    if (newPage === page) return;
+    // Push current page to browser history before switching
+    window.history.pushState({ page: newPage }, '', window.location.pathname);
+    setPage(newPage);
+  };
 
   useEffect(() => {
-    // Warm-up ping (non-critical)
-    supabase.from('settings').select('key').limit(1).then(() => {});
+    // Handle browser back button — restore previous page
+    const handlePopState = (e) => {
+      if (e.state && e.state.page) {
+        setPage(e.state.page);
+      } else {
+        setPage('dashboard');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    supabase.from('settings').select('key').limit(1);
 
     const restoreSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -105,7 +126,6 @@ export default function App() {
         const { data: profile } = await supabase
           .from('users').select('*').eq('id', session.user.id).maybeSingle();
 
-        // FIX: Check role server-side from DB, never trust client-side state alone
         if (profile && profile.is_active !== false) {
           let username = profile.username;
           if (!username) {
@@ -113,13 +133,13 @@ export default function App() {
             await supabase.from('users').update({ username }).eq('id', session.user.id);
           }
           setUser({
-            id:             session.user.id,
-            name:           profile.full_name,
-            email:          profile.email,
+            id:            session.user.id,
+            name:          profile.full_name,
+            email:         profile.email,
             username,
-            role:           profile.role,       // role comes from DB, not JWT
-            balance:        parseFloat(profile.balance || 0),
-            referral_code:  profile.referral_code,
+            role:          profile.role,
+            balance:       parseFloat(profile.balance || 0),
+            referral_code: profile.referral_code,
           });
           setScreen('app');
           return;
@@ -134,9 +154,7 @@ export default function App() {
         if (event === 'SIGNED_OUT') {
           setUser(null); setScreen('landing'); setPage('dashboard');
         }
-        if (event === 'PASSWORD_RECOVERY') {
-          setScreen('auth'); setAuthTab('login');
-        }
+        if (event === 'PASSWORD_RECOVERY') { setScreen('auth'); setAuthTab('login'); }
       }
     );
     return () => subscription.unsubscribe();
@@ -148,7 +166,13 @@ export default function App() {
   };
 
   const handleAuth  = (tab) => { setAuthTab(tab); setScreen('auth'); };
-  const handleLogin = (u)   => { setUser(u); setPage('dashboard'); setScreen('app'); };
+  const handleLogin = (u)   => {
+    setUser(u);
+    setPage('dashboard');
+    setScreen('app');
+    // Seed history so back button works from first page
+    window.history.replaceState({ page:'dashboard' }, '', window.location.pathname);
+  };
 
   const toggleTheme = () => {
     const next = !darkMode;
@@ -156,15 +180,13 @@ export default function App() {
     document.body.className = next ? '' : 'light';
   };
 
-  if (screen === 'loading') {
-    return (
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', flexDirection:'column', gap:'16px' }}>
-        <div className="gbg" />
-        <div style={{ fontFamily:'var(--fd)', fontSize:'18px', letterSpacing:'4px', color:'var(--neon)' }}>NEXUSFLOW HUB</div>
-        <div style={{ fontSize:'12px', color:'var(--text3)', letterSpacing:'2px' }}>Loading...</div>
-      </div>
-    );
-  }
+  if (screen === 'loading') return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', flexDirection:'column', gap:'16px' }}>
+      <div className="gbg" />
+      <div style={{ fontFamily:'var(--fd)', fontSize:'18px', letterSpacing:'4px', color:'var(--neon)' }}>NEXUSFLOW HUB</div>
+      <div style={{ fontSize:'12px', color:'var(--text3)', letterSpacing:'2px' }}>Loading...</div>
+    </div>
+  );
 
   if (screen === 'landing') return <Landing onAuth={handleAuth} />;
   if (screen === 'auth')    return <Auth onLogin={handleLogin} defaultTab={authTab} />;
@@ -174,26 +196,21 @@ export default function App() {
                   : user.role === 'reseller' ? resellerNav
                   : buyerNav;
 
-  // ── FIX: Role-based routing — only renders pages the user's DB role allows.
-  // Client-side routing is for UI convenience only. Real security is enforced
-  // by Supabase RLS policies on the database. Each admin component only shows
-  // because user.role === 'admin' where role was read from the DB at login.
   const renderPage = () => {
     if (user.role === 'buyer') {
-      if (page === 'dashboard')   return <BuyerDashboard user={user} onNav={setPage} />;
-      if (page === 'marketplace') return <Marketplace    user={user} onNav={setPage} />;
-      if (page === 'deposit')     return <Deposit        user={user} />;
-      if (page === 'orders')      return <Orders         user={user} />;
-      if (page === 'transactions')return <Transactions   user={user} />;
-      if (page === 'referral')    return <Referral       user={user} />;
-      if (page === 'tasks')       return <Tasks          user={user} />;
-      if (page === 'panelapi')    return <PanelApi       user={user} />;
-      if (page === 'buyersupport')return <SupportTicket  user={user} />;
-      if (page === 'profile')     return <Profile        user={user} onLogout={logout} />;
+      if (page === 'dashboard')    return <BuyerDashboard user={user} onNav={navigateTo} />;
+      if (page === 'marketplace')  return <Marketplace    user={user} onNav={navigateTo} />;
+      if (page === 'deposit')      return <Deposit        user={user} />;
+      if (page === 'orders')       return <Orders         user={user} />;
+      if (page === 'transactions') return <Transactions   user={user} />;
+      if (page === 'referral')     return <Referral       user={user} />;
+      if (page === 'tasks')        return <Tasks          user={user} />;
+      if (page === 'panelapi')     return <PanelApi       user={user} />;
+      if (page === 'buyersupport') return <SupportTicket  user={user} />;
+      if (page === 'profile')      return <Profile        user={user} onLogout={logout} />;
     }
-
     if (user.role === 'admin') {
-      if (page === 'dashboard')     return <AdminDashboard user={user} onNav={setPage} />;
+      if (page === 'dashboard')     return <AdminDashboard  user={user} onNav={navigateTo} />;
       if (page === 'adminorders')   return <AdminOrders />;
       if (page === 'adminservices') return <AdminServices />;
       if (page === 'deposits')      return <AdminDeposits />;
@@ -210,9 +227,8 @@ export default function App() {
       if (page === 'massemail')     return <AdminMassEmail />;
       if (page === 'profile')       return <Profile user={user} onLogout={logout} />;
     }
-
     if (user.role === 'reseller') {
-      if (page === 'dashboard')    return <ResellerDashboard user={user} onNav={setPage} />;
+      if (page === 'dashboard')    return <ResellerDashboard user={user} onNav={navigateTo} />;
       if (page === 'services')     return <ResellerServices  user={user} />;
       if (page === 'earnings')     return <ResellerEarnings  user={user} />;
       if (page === 'transactions') return <Transactions      user={user} />;
@@ -220,8 +236,6 @@ export default function App() {
       if (page === 'panelapi')     return <PanelApi          user={user} />;
       if (page === 'profile')      return <Profile           user={user} onLogout={logout} />;
     }
-
-    // Fallback for any unmatched page
     return (
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'50vh', gap:'12px', textAlign:'center', padding:'20px' }}>
         <div style={{ fontSize:'40px' }}>🚧</div>
@@ -229,7 +243,7 @@ export default function App() {
           {pageTitles[page] || page}
         </div>
         <div style={{ fontSize:'12px', color:'var(--text3)' }}>Coming soon</div>
-        <button className="btn bgh bsm" onClick={() => setPage('dashboard')}>← Back</button>
+        <button className="btn bgh bsm" onClick={() => navigateTo('dashboard')}>← Back</button>
       </div>
     );
   };
@@ -237,10 +251,10 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="gbg" />
-      <Sidebar user={user} page={page} onNav={setPage} open={sbOpen} onClose={() => setSbOpen(false)} />
+      <Sidebar user={user} page={page} onNav={navigateTo} open={sbOpen} onClose={() => setSbOpen(false)} />
       <main className="main">
         <Topbar
-          user={user} page={page} onNav={setPage} onLogout={logout}
+          user={user} page={page} onNav={navigateTo} onLogout={logout}
           onCurrency={() => setShowCurrency(true)} onTheme={toggleTheme}
           darkMode={darkMode} setSbOpen={setSbOpen}
         />
@@ -250,8 +264,9 @@ export default function App() {
       </main>
       <nav className="mobnav">
         {mobileNav.map(item => (
-          <div key={item.id} className={`mni ${page === item.id ? 'on' : ''}`}
-            onClick={() => setPage(item.id)}>
+          <div key={item.id}
+            className={`mni ${page === item.id ? 'on' : ''}`}
+            onClick={() => navigateTo(item.id)}>
             <span className="mni-ic">{item.ic}</span>
             <span>{item.lb}</span>
           </div>
