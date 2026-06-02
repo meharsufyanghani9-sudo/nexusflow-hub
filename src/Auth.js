@@ -27,17 +27,12 @@ export default function Auth({ onLogin, defaultTab }) {
   const [forgotSent, setForgotSent] = useState(false);
 
   const [refCode, setRefCode] = useState('');
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
     if (ref) {
-      // FIX: Sanitize referral code — only allow alphanumeric characters
-      const cleanRef = ref.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
-      if (cleanRef) {
-        setRefCode(cleanRef);
-        setTab('signup');
-      }
+      setRefCode(ref);
+      setTab('signup');
     }
   }, []);
 
@@ -58,7 +53,10 @@ export default function Auth({ onLogin, defaultTab }) {
           .select('id')
           .eq('username', uname.toLowerCase())
           .maybeSingle();
-        if (error) { setUsernameStatus('available'); return; }
+        if (error) {
+          setUsernameStatus('available');
+          return;
+        }
         setUsernameStatus(data ? 'taken' : 'available');
       } catch (e) {
         setUsernameStatus('available');
@@ -92,18 +90,22 @@ export default function Auth({ onLogin, defaultTab }) {
     if (!loginId || !password) { setError('Fill all fields'); return; }
     setLoading(true);
 
+    // Strip leading @ if user typed @username
     const rawInput = loginId.trim();
     const cleanedInput = rawInput.startsWith('@') ? rawInput.slice(1) : rawInput;
 
-    // FIX: Proper email regex — prevents username lookups for invalid emails
+    // ── FIX: A proper email must match the pattern: something@something.something
+    // We use a simple but reliable email regex instead of just checking for @ and .
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const looksLikeEmail = emailRegex.test(cleanedInput);
 
     let emailToUse = '';
 
     if (looksLikeEmail) {
+      // User typed an email — use it directly (lowercase to avoid case issues)
       emailToUse = cleanedInput.toLowerCase();
     } else {
+      // User typed a username — look up their email in the users table
       const { data: userRow, error: lookupErr } = await supabase
         .from('users')
         .select('email')
@@ -115,15 +117,20 @@ export default function Auth({ onLogin, defaultTab }) {
         setLoading(false);
         return;
       }
+
+      // ── FIX: Always use the exact email stored in the database (lowercase)
+      // This prevents case mismatch issues with Supabase Auth
       emailToUse = userRow.email.toLowerCase().trim();
     }
 
+    // Now sign in with email + password
     const { data, error: err } = await supabase.auth.signInWithPassword({
       email: emailToUse,
       password: password,
     });
 
     if (err) {
+      // ── FIX: Give a more helpful error message
       if (err.message && err.message.toLowerCase().includes('invalid')) {
         setError('Incorrect password. Please try again.');
       } else {
@@ -139,7 +146,7 @@ export default function Auth({ onLogin, defaultTab }) {
       return;
     }
 
-    // Fetch profile (retry in case DB trigger is still running)
+    // Fetch profile (retry in case trigger is still running)
     let profile = null;
     for (let i = 0; i < 5; i++) {
       const { data: p } = await supabase
@@ -148,7 +155,7 @@ export default function Auth({ onLogin, defaultTab }) {
       await new Promise(r => setTimeout(r, 700));
     }
 
-    // If profile still missing, create it manually
+    // If profile still missing, create it manually (trigger may have failed)
     if (!profile) {
       await supabase.from('users').insert({
         id: data.user.id,
@@ -169,38 +176,28 @@ export default function Auth({ onLogin, defaultTab }) {
     }
 
     if (profile.is_active === false) {
-      await supabase.auth.signOut();
       setError('Account suspended. Contact support.');
       setLoading(false);
       return;
     }
 
     onLogin({
-      id:            data.user.id,
-      name:          profile.full_name,
-      email:         profile.email,
-      username:      profile.username,
-      role:          profile.role,
-      balance:       parseFloat(profile.balance || 0),
+      id: data.user.id,
+      name: profile.full_name,
+      email: profile.email,
+      username: profile.username,
+      role: profile.role,
+      balance: parseFloat(profile.balance || 0),
       referral_code: profile.referral_code,
     });
   };
 
-  // ── SIGNUP ─────────────────────────────────────────────────────────────────
+  // ── SIGNUP ────────────────────────────────────────────────────────────────
   const handleSignup = async () => {
     setError(''); setMsg('');
-
     if (!name || !email || !signupPassword || !signupUsername) {
       setError('Fill all fields'); return;
     }
-
-    // FIX: Validate email format before sending to Supabase
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
-      setError('Please enter a valid email address'); return;
-    }
-
-    // FIX: Minimum password length enforced
     if (signupPassword.length < 8) { setError('Password min 8 characters'); return; }
     if (signupUsername.length < 3) { setError('Username must be at least 3 characters'); return; }
     if (usernameStatus === 'taken') { setError('That username is already taken'); return; }
@@ -208,7 +205,7 @@ export default function Auth({ onLogin, defaultTab }) {
 
     setLoading(true);
 
-    // Final server-side double-check on username uniqueness
+    // Final double-check
     const { data: existingUser } = await supabase
       .from('users')
       .select('id')
@@ -232,7 +229,7 @@ export default function Auth({ onLogin, defaultTab }) {
     if (data?.user) {
       await new Promise(r => setTimeout(r, 1500));
       await supabase.from('users').update({
-        username:    signupUsername.toLowerCase(),
+        username: signupUsername.toLowerCase(),
         referred_by: refCode || null,
       }).eq('id', data.user.id);
     }
@@ -244,18 +241,13 @@ export default function Auth({ onLogin, defaultTab }) {
     setLoading(false);
   };
 
-  // ── FORGOT PASSWORD ────────────────────────────────────────────────────────
+  // ── FORGOT PASSWORD ───────────────────────────────────────────────────────
   const handleForgotPassword = async () => {
     if (!forgotEmail) { setError('Enter your email'); return; }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(forgotEmail.trim())) {
-      setError('Please enter a valid email address'); return;
-    }
     setLoading(true);
-    const { error: err } = await supabase.auth.resetPasswordForEmail(
-      forgotEmail.trim().toLowerCase(),
-      { redirectTo: window.location.origin }
-    );
+    const { error: err } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+      redirectTo: window.location.origin,
+    });
     setLoading(false);
     if (err) { setError(err.message); return; }
     setForgotSent(true);
@@ -294,9 +286,7 @@ export default function Auth({ onLogin, defaultTab }) {
                 <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '20px', lineHeight: 1.6 }}>
                   Check your inbox at <strong>{forgotEmail}</strong> and click the link to reset your password.
                 </div>
-                <button className="btn bgh bmd" onClick={() => {
-                  setShowForgot(false); setForgotSent(false); setForgotEmail(''); setError('');
-                }}>
+                <button className="btn bgh bmd" onClick={() => { setShowForgot(false); setForgotSent(false); setForgotEmail(''); }}>
                   ← Back to Login
                 </button>
               </div>
@@ -381,7 +371,7 @@ export default function Auth({ onLogin, defaultTab }) {
                   className="inp" type="password" placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && !loading && handleLogin()}
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
                 />
               </div>
               <div className="aerr">{error}</div>
@@ -442,30 +432,9 @@ export default function Auth({ onLogin, defaultTab }) {
               </div>
 
               <div className="fi">
-                <label className="fl">Password <span style={{ color:'var(--text3)', fontWeight:400 }}>(min 8 characters)</span></label>
+                <label className="fl">Password</label>
                 <input className="inp" type="password" placeholder="Min 8 characters"
                   value={signupPassword} onChange={e => setSignupPassword(e.target.value)} />
-                {/* FIX: Password strength bar — visual guide for beginners */}
-                {signupPassword && (
-                  <div style={{ marginTop: '6px' }}>
-                    <div style={{ height: '3px', borderRadius: '3px', background: 'var(--br)', overflow: 'hidden' }}>
-                      <div style={{
-                        height: '100%', borderRadius: '3px', transition: 'all .3s',
-                        width: signupPassword.length < 6  ? '25%'
-                             : signupPassword.length < 8  ? '50%'
-                             : signupPassword.length < 12 ? '75%' : '100%',
-                        background: signupPassword.length < 6  ? 'var(--danger)'
-                                  : signupPassword.length < 8  ? 'var(--warn)'
-                                  : signupPassword.length < 12 ? 'var(--neon)'  : 'var(--green)',
-                      }} />
-                    </div>
-                    <div style={{ fontSize:'10px', marginTop:'3px', color: signupPassword.length < 8 ? 'var(--danger)' : 'var(--green)' }}>
-                      {signupPassword.length < 6  ? 'Too weak'
-                     : signupPassword.length < 8  ? 'Too short — need 8+ chars'
-                     : signupPassword.length < 12 ? 'Good'    : '✅ Strong'}
-                    </div>
-                  </div>
-                )}
               </div>
 
               <div className="aerr">{error}</div>
