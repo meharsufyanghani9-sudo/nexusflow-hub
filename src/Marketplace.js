@@ -1,172 +1,218 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
+// ─── Platform config ──────────────────────────────────────────────────────────
 const platformIcons = {
-  instagram: '📸', tiktok: '🎵', youtube: '▶️', twitter: '🐦',
-  facebook: '👤', telegram: '✈️', snapchat: '👻', linkedin: '💼',
-  spotify: '🎵', discord: '🎮', twitch: '🎮', custom: '⚙️'
+  instagram:'📸', tiktok:'🎵', youtube:'▶️', twitter:'🐦',
+  facebook:'👤', telegram:'✈️', snapchat:'👻', linkedin:'💼',
+  spotify:'🎵', discord:'🎮', twitch:'🎮', google:'🔍',
+  whatsapp:'💬', website:'🌐', threads:'🧵', capcut:'🎬',
+  custom:'⚙️', other:'⚙️',
 };
 const platformColors = {
-  instagram: '#E1306C', tiktok: '#00d4ff', youtube: '#FF0000',
-  twitter: '#1DA1F2', facebook: '#1877F2', telegram: '#0088cc',
-  snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff'
+  instagram:'#E1306C', tiktok:'#00d4ff', youtube:'#FF0000',
+  twitter:'#1DA1F2', facebook:'#1877F2', telegram:'#0088cc',
+  snapchat:'#FFFC00', linkedin:'#0077B5', custom:'#7b2fff',
+  google:'#4285F4', whatsapp:'#25D366', website:'#7b2fff',
+  discord:'#5865F2', threads:'#000', twitch:'#9146FF', capcut:'#000',
 };
 
-// ─── SECURITY FIX: Helper to sanitize HTML in email / stored strings ─────────
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
-}
+// ─── Service type tags (for filter badges) ────────────────────────────────────
+const TYPE_TAGS = [
+  { id:'all',         label:'✦ All',              match: () => true },
+  { id:'guaranteed',  label:'✅ Guaranteed',       match: s => /guaranteed|lifetime/i.test(s.name+s.description) },
+  { id:'nondrop',     label:'💎 Non-Drop',         match: s => /non.?drop/i.test(s.name+s.description) },
+  { id:'budget',      label:'💰 Budget',           match: s => parseFloat(s.price_per_1k) < 1 },
+  { id:'refill',      label:'🔄 With Refill',      match: s => /refill/i.test(s.name+s.description) },
+  { id:'norefill',    label:'🚫 No Refill',        match: s => /no refill/i.test(s.name+s.description) },
+  { id:'fast',        label:'⚡ Fast Delivery',    match: s => /start: 0/i.test(s.name+s.description) },
+  { id:'lifetime',    label:'♾ Lifetime',          match: s => /lifetime/i.test(s.name+s.description) },
+];
+
+const SERVICE_CATS = ['All','Followers','Likes','Views','Comments','Shares','Subscribers','Saves','Members','Reactions','Traffic'];
+
+const SORT_OPTIONS = [
+  { id:'featured', label:'⭐ Featured First' },
+  { id:'low',      label:'💰 Low → High' },
+  { id:'high',     label:'💰 High → Low' },
+  { id:'new',      label:'🆕 Newest' },
+];
+
+const PAGE_SIZE = 20; // load 20 at a time for performance
 
 export default function Marketplace({ user, onNav }) {
   const { format } = useCurrency();
-  const [services, setServices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [platform, setPlatform] = useState('');
-  const [showAll, setShowAll] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [link, setLink] = useState('');
-  const [qty, setQty] = useState('');
-  const [ordering, setOrdering] = useState(false);
-  const [ordered, setOrdered] = useState(false);
-  const [orderError, setOrderError] = useState('');
 
-  useEffect(() => { loadServices(); }, []);
+  // ─── Data state ───────────────────────────────────────────────────────────
+  const [allServices,  setAllServices]  = useState([]);
+  const [displayed,    setDisplayed]    = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [loadingMore,  setLoadingMore]  = useState(false);
+  const [totalCount,   setTotalCount]   = useState(0);
+  const offsetRef = useRef(0);
 
-  const loadServices = async () => {
+  // ─── Filter / sort state ──────────────────────────────────────────────────
+  const [activePlatform, setActivePlatform] = useState('');
+  const [activeType,     setActiveType]     = useState('all');
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [sortBy,         setSortBy]         = useState('featured');
+  const [search,         setSearch]         = useState('');
+  const [showAll,        setShowAll]        = useState(false);
+
+  // ─── Order modal state ────────────────────────────────────────────────────
+  const [selected,    setSelected]    = useState(null);
+  const [link,        setLink]        = useState('');
+  const [qty,         setQty]         = useState('');
+  const [ordering,    setOrdering]    = useState(false);
+  const [ordered,     setOrdered]     = useState(false);
+  const [orderError,  setOrderError]  = useState('');
+
+  // ─── Available platform list (derived from loaded services) ───────────────
+  const [platforms, setPlatforms] = useState([]);
+
+  // ─── Initial load ─────────────────────────────────────────────────────────
+  useEffect(() => { loadInitial(); }, []);
+
+  const loadInitial = async () => {
     setLoading(true);
-    // ─── SECURITY FIX: Select only safe columns — NEVER select provider_api_key
-    // or provider_api_url from services table. Those are for server-side only.
-    // A buyer should never see your provider credentials.
-    const { data } = await supabase
+    offsetRef.current = 0;
+
+    // Load first page + get total count
+    const { data, count } = await supabase
       .from('services')
-      .select('id, name, platform, description, price_per_1k, min_qty, max_qty, is_active, is_featured, created_at')
+      .select('id,name,platform,description,price_per_1k,min_qty,max_qty,is_active,is_featured,category,created_at,provider_api_url,provider_api_key,provider_service_id,provider_id', { count: 'exact' })
       .eq('is_active', true)
       .order('is_featured', { ascending: false })
-      .order('created_at', { ascending: false });
-    if (data) setServices(data);
+      .order('created_at', { ascending: false })
+      .range(0, PAGE_SIZE - 1);
+
+    if (data) {
+      setDisplayed(data);
+      offsetRef.current = data.length;
+      // Extract unique platform list
+      const { data: allPlat } = await supabase
+        .from('services')
+        .select('platform')
+        .eq('is_active', true);
+      if (allPlat) {
+        const unique = [...new Set(allPlat.map(s => s.platform))].filter(Boolean).sort();
+        setPlatforms(unique);
+      }
+    }
+    if (count !== null) setTotalCount(count);
     setLoading(false);
   };
 
-  const featuredServices = services.filter(s => s.is_featured);
-  const otherServices = services.filter(s => !s.is_featured);
-  const availablePlatforms = [...new Set(otherServices.map(s => s.platform))].filter(Boolean);
+  // ─── Load more (infinite scroll / Load More button) ──────────────────────
+  const loadMore = async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    const { data } = await supabase
+      .from('services')
+      .select('id,name,platform,description,price_per_1k,min_qty,max_qty,is_active,is_featured,category,created_at,provider_api_url,provider_api_key,provider_service_id,provider_id')
+      .eq('is_active', true)
+      .order('is_featured', { ascending: false })
+      .order('created_at', { ascending: false })
+      .range(offsetRef.current, offsetRef.current + PAGE_SIZE - 1);
+    if (data && data.length > 0) {
+      setDisplayed(prev => [...prev, ...data]);
+      offsetRef.current += data.length;
+    }
+    setLoadingMore(false);
+  };
 
-  const filteredOthers = otherServices.filter(s => {
-    const matchPl = !platform || s.platform === platform;
-    const matchQ = !search || s.name.toLowerCase().includes(search.toLowerCase());
-    return matchPl && matchQ;
-  });
+  // ─── Client-side filter + sort on already-loaded services ─────────────────
+  const applyFilters = useCallback((services) => {
+    let result = [...services];
 
-  // Calculate display cost (for preview only — actual cost recalculated in placeOrder)
+    // Platform filter
+    if (activePlatform) result = result.filter(s => s.platform === activePlatform);
+
+    // Category filter
+    if (activeCategory !== 'All') {
+      result = result.filter(s =>
+        (s.name + (s.description || '') + (s.category || '')).toLowerCase()
+          .includes(activeCategory.toLowerCase())
+      );
+    }
+
+    // Type tag filter
+    const typeMatch = TYPE_TAGS.find(t => t.id === activeType);
+    if (typeMatch && activeType !== 'all') result = result.filter(typeMatch.match);
+
+    // Search
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.description || '').toLowerCase().includes(q) ||
+        (s.category || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Sort
+    if (sortBy === 'low')  result.sort((a,b) => parseFloat(a.price_per_1k) - parseFloat(b.price_per_1k));
+    if (sortBy === 'high') result.sort((a,b) => parseFloat(b.price_per_1k) - parseFloat(a.price_per_1k));
+    if (sortBy === 'new')  result.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+    if (sortBy === 'featured') result.sort((a,b) => (b.is_featured?1:0) - (a.is_featured?1:0));
+
+    return result;
+  }, [activePlatform, activeCategory, activeType, search, sortBy]);
+
+  const featuredServices = displayed.filter(s => s.is_featured);
+  const filteredAll      = applyFilters(displayed);
+  const filteredNonFeatured = filteredAll.filter(s => !s.is_featured);
+  const hasMore = offsetRef.current < totalCount;
+
+  // ─── Cost calculation ─────────────────────────────────────────────────────
   const displayCost = selected && qty
     ? (parseFloat(qty) / 1000 * parseFloat(selected.price_per_1k)).toFixed(4)
-    : '0.00';
+    : '0.0000';
 
+  // ─── Place Order ──────────────────────────────────────────────────────────
   const placeOrder = async () => {
     setOrderError('');
+    if (!link.trim()) { setOrderError('Enter your link or username'); return; }
 
-    // ─── FIX: Validate link field ─────────────────────────────────────────
-    if (!link.trim()) {
-      setOrderError('Please enter your link or username');
-      return;
-    }
-    // Check it looks like a real URL (or at least not a script injection)
-    const linkTrimmed = link.trim();
-    if (linkTrimmed.toLowerCase().startsWith('javascript:') ||
-        linkTrimmed.toLowerCase().startsWith('data:') ||
-        linkTrimmed.toLowerCase().startsWith('vbscript:')) {
-      setOrderError('Invalid link format');
-      return;
-    }
-    // ─────────────────────────────────────────────────────────────────────
-
-    // ─── FIX: Strict quantity validation — no decimals, no scientific notation ─
+    // Strict quantity validation
     const rawQty = qty.toString().trim();
-    if (!/^\d+$/.test(rawQty)) {
-      setOrderError('Quantity must be a whole number (no decimals or letters)');
-      return;
-    }
+    if (!/^\d+$/.test(rawQty)) { setOrderError('Quantity must be a whole number'); return; }
     const q = parseInt(rawQty, 10);
-    if (isNaN(q) || q <= 0) {
-      setOrderError('Please enter a valid quantity');
+    if (!q || q < selected.min_qty || q > selected.max_qty) {
+      setOrderError(`Quantity must be between ${selected.min_qty.toLocaleString()} – ${selected.max_qty.toLocaleString()}`);
       return;
     }
-    if (q < selected.min_qty || q > selected.max_qty) {
-      setOrderError(`Quantity must be between ${selected.min_qty.toLocaleString()} and ${selected.max_qty.toLocaleString()}`);
-      return;
-    }
-    // ─────────────────────────────────────────────────────────────────────
 
-    // ─── FIX: Recalculate cost from validated integer (not from display state) ─
     const totalCost = parseFloat((q / 1000 * parseFloat(selected.price_per_1k)).toFixed(4));
-    if (isNaN(totalCost) || totalCost <= 0) {
-      setOrderError('Could not calculate order cost. Please try again.');
+
+    // Read LIVE balance from DB to prevent race condition
+    const { data: freshUser } = await supabase
+      .from('users').select('balance').eq('id', user.id).single();
+    if (!freshUser) { setOrderError('Could not verify balance. Please refresh.'); return; }
+    if (totalCost > parseFloat(freshUser.balance || 0)) {
+      setOrderError(`Insufficient balance. Need ${format(totalCost)}, have ${format(freshUser.balance)}`);
       return;
     }
-    // ─────────────────────────────────────────────────────────────────────
 
-    // Prevent double-click by setting ordering state immediately
     setOrdering(true);
+    const orderRef = 'NF-' + Date.now();
 
-    // ─── FIX: Read LIVE balance from database (not stale React state) ────────
-    // The old code used user.balance (a prop that doesn't update in real-time).
-    // Two tabs open = both see the same old balance = double-order exploit.
-    const { data: freshUser, error: freshErr } = await supabase
+    // Deduct balance first
+    const { error: balErr } = await supabase
       .from('users')
-      .select('balance')
+      .update({ balance: parseFloat(freshUser.balance) - totalCost })
       .eq('id', user.id)
-      .single();
+      .gte('balance', totalCost);
+    if (balErr) { setOrderError('Balance error. Please retry.'); setOrdering(false); return; }
 
-    if (freshErr || !freshUser) {
-      setOrderError('Could not verify your balance. Please refresh and try again.');
-      setOrdering(false);
-      return;
-    }
-
-    const liveBalance = parseFloat(freshUser.balance || 0);
-
-    if (totalCost > liveBalance) {
-      setOrderError(`Insufficient balance. You need $${totalCost.toFixed(4)} but have $${liveBalance.toFixed(2)}`);
-      setOrdering(false);
-      return;
-    }
-    // ─────────────────────────────────────────────────────────────────────
-
-    // ─── FIX: Deduct balance FIRST with an atomic guard ───────────────────
-    // .gte('balance', totalCost) means: "only update IF balance is still enough"
-    // If another tab placed an order at the same time, this will fail safely.
-    const { error: balanceErr } = await supabase
-      .from('users')
-      .update({ balance: liveBalance - totalCost })
-      .eq('id', user.id)
-      .gte('balance', totalCost); // atomic safety check
-
-    if (balanceErr) {
-      setOrderError('Balance check failed — your balance may have changed. Please refresh and try again.');
-      setOrdering(false);
-      return;
-    }
-    // ─────────────────────────────────────────────────────────────────────
-
-    // ─── FIX: Use crypto.randomUUID for unique order reference (no collisions) ─
-    const orderRef = 'NF-' + crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase();
-    // ─────────────────────────────────────────────────────────────────────
-
-    // Now create the order record
     const { error: orderErr } = await supabase.from('orders').insert({
       order_ref: orderRef,
       user_id: user.id,
       service_id: selected.id,
       service_name: selected.name,
       platform: selected.platform,
-      link: escapeHtml(linkTrimmed), // sanitize before storing
+      link: link.trim(),
       quantity: q,
       cost: totalCost,
       status: 'pending',
@@ -174,237 +220,314 @@ export default function Marketplace({ user, onNav }) {
     });
 
     if (orderErr) {
-      // ─── ROLLBACK: Order creation failed — refund the balance we just deducted
-      await supabase
-        .from('users')
-        .update({ balance: liveBalance })
-        .eq('id', user.id);
-      setOrderError('Order creation failed: ' + orderErr.message + '. Your balance has been restored.');
+      // Rollback
+      await supabase.from('users').update({ balance: parseFloat(freshUser.balance) }).eq('id', user.id);
+      setOrderError('Order failed: ' + orderErr.message + '. Balance restored.');
       setOrdering(false);
       return;
     }
 
-    // Log the transaction
     await supabase.from('transactions').insert({
-      user_id: user.id,
-      type: 'order',
-      amount: -totalCost,
-      description: `Order: ${selected.name}`,
-      ref_id: orderRef,
+      user_id: user.id, type: 'order', amount: -totalCost,
+      description: `Order: ${selected.name}`, ref_id: orderRef,
     });
 
-    // ─── SECURITY FIX: Provider API call is now handled server-side ──────────
-    // We NO LONGER call the provider API directly from the browser.
-    // Reason: doing so exposes your provider API key to every buyer because
-    // selected.provider_api_key was readable in the browser's network tab.
-    //
-    // The order is now placed as 'pending' — your admin (or a backend cron job
-    // / Supabase Edge Function) should pick up pending orders and send them
-    // to the provider server-side, where the API key is never exposed.
-    //
-    // If you want fully automatic order placement, create a Supabase Edge
-    // Function called "process-order" that reads the provider key from the
-    // database securely and sends the order. The function is called below
-    // using the Supabase functions client (server-side execution only).
-
-    try {
-      // Attempt to trigger server-side order processing via Edge Function
-      // This is safe because the Edge Function runs on Supabase servers,
-      // not in the user's browser — API keys never leave the server.
-      await supabase.functions.invoke('process-order', {
-        body: { order_ref: orderRef, service_id: selected.id, link: linkTrimmed, quantity: q },
-      });
-      // If this fails, order stays as 'pending' for admin to process manually
-    } catch (_) {
-      // Silent fail — order is already created, admin can process it manually
+    // ─── Automatic provider API placement ────────────────────────────────────
+    if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
+      try {
+        const res = await fetch(
+          `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/proxy`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({
+            url: selected.provider_api_url,
+            key: selected.provider_api_key,
+            action: 'add',
+            service: selected.provider_service_id,
+            link: link.trim(),
+            quantity: q,
+          }),
+        });
+        const providerData = await res.json();
+        if (providerData?.order) {
+          await supabase.from('orders').update({
+            vendor_order_id: String(providerData.order),
+            status: 'in_progress',
+          }).eq('order_ref', orderRef);
+        } else if (providerData?.error) {
+          await supabase.from('orders').update({
+            provider_note: `Provider error: ${providerData.error}`,
+          }).eq('order_ref', orderRef);
+        }
+      } catch (e) {
+        await supabase.from('orders').update({
+          provider_note: `Auto-placement failed: ${e.message}`,
+        }).eq('order_ref', orderRef);
+      }
     }
 
     setOrdering(false);
     setOrdered(true);
-    setTimeout(() => {
-      setSelected(null);
-      setOrdered(false);
-      setLink('');
-      setQty('');
-    }, 2500);
+    setTimeout(() => { setSelected(null); setOrdered(false); setLink(''); setQty(''); }, 2500);
   };
 
-  const ic = (p) => platformIcons[p] || '⚙️';
-  const cl = (p) => platformColors[p] || '#7b2fff';
+  const ic = p => platformIcons[p]  || '⚙️';
+  const cl = p => platformColors[p] || '#7b2fff';
 
+  // ─── Service Card ─────────────────────────────────────────────────────────
   const ServiceCard = ({ s }) => (
     <div
       className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
       onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
       {s.is_featured && (
         <div style={{
-          position: 'absolute', top: '-1px', right: '10px',
-          background: 'linear-gradient(135deg,var(--gold2),var(--gold))',
-          color: '#000', fontSize: '8px', fontWeight: 800, padding: '3px 8px',
-          borderRadius: '0 0 6px 6px', letterSpacing: '1px', fontFamily: 'var(--fd)'
+          position:'absolute', top:'-1px', right:'10px',
+          background:'linear-gradient(135deg,var(--gold2),var(--gold))',
+          color:'#000', fontSize:'8px', fontWeight:800, padding:'3px 8px',
+          borderRadius:'0 0 6px 6px', letterSpacing:'1px', fontFamily:'var(--fd)'
         }}>⭐ FEATURED</div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-        <span style={{ fontSize: '22px' }}>{ic(s.platform)}</span>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px' }}>
+        <span style={{ fontSize:'22px' }}>{ic(s.platform)}</span>
         <span style={{
-          fontSize: '9px', padding: '2px 7px', borderRadius: '10px', fontWeight: 700,
-          background: `${cl(s.platform)}18`, color: cl(s.platform),
-          border: `1px solid ${cl(s.platform)}30`, textTransform: 'uppercase', letterSpacing: '1px'
+          fontSize:'9px', padding:'2px 7px', borderRadius:'10px', fontWeight:700,
+          background:`${cl(s.platform)}18`, color:cl(s.platform),
+          border:`1px solid ${cl(s.platform)}30`, textTransform:'uppercase', letterSpacing:'1px'
         }}>{s.platform}</span>
       </div>
-      <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px', color: 'var(--text)' }}>{s.name}</div>
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px', flex: 1, lineHeight: 1.5 }}>{s.description}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+      <div style={{ fontWeight:700, fontSize:'13px', marginBottom:'4px', color:'var(--text)' }}>{s.name}</div>
+      <div style={{ fontSize:'11px', color:'var(--text3)', marginBottom:'12px', flex:1, lineHeight:1.5 }}>{s.description}</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'auto' }}>
         <div>
-          <div style={{ fontFamily: 'var(--fm)', fontSize: '15px', fontWeight: 700, color: 'var(--gold)' }}>
+          <div style={{ fontFamily:'var(--fm)', fontSize:'15px', fontWeight:700, color:'var(--gold)' }}>
             {format(parseFloat(s.price_per_1k))}
           </div>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>per 1,000</div>
+          <div style={{ fontSize:'9px', color:'var(--text3)' }}>per 1,000</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Min: {(s.min_qty || 0).toLocaleString()}</div>
-          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Max: {(s.max_qty || 0).toLocaleString()}</div>
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:'9px', color:'var(--text3)' }}>Min: {(s.min_qty||0).toLocaleString()}</div>
+          <div style={{ fontSize:'9px', color:'var(--text3)' }}>Max: {(s.max_qty||0).toLocaleString()}</div>
         </div>
       </div>
-      <button className="btn bp bsm bw" style={{ marginTop: '12px' }}>Order Now →</button>
+      <button className="btn bp bsm bw" style={{ marginTop:'12px' }}>Order Now →</button>
     </div>
   );
 
   return (
     <div>
-      {/* ─── FEATURED SERVICES ─── */}
-      {!loading && featuredServices.length > 0 && (
-        <>
-          <div className="st">⭐ Featured Services
-            <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, letterSpacing: '1px', marginLeft: '8px' }}>
-              — Handpicked by admin
-            </span>
-          </div>
-          <div className="mkt-grid" style={{ marginBottom: '24px' }}>
-            {featuredServices.map(s => <ServiceCard key={s.id} s={s} />)}
-          </div>
-        </>
-      )}
-
-      {/* ─── ALL SERVICES ─── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <div className="st" style={{ margin: 0 }}>🛒 All Services</div>
-        {otherServices.length > 0 && (
-          <span style={{ fontSize: '9px', color: 'var(--text3)' }}>{otherServices.length} available</span>
-        )}
+      {/* ─── TOP TABS: Featured | Live Services ─── */}
+      <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
         <button
-          className="btn bgh bsm"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => setShowAll(!showAll)}>
-          {showAll ? '▲ Collapse' : '▼ Browse All'}
+          onClick={() => setShowAll(false)}
+          style={{
+            flex:1, padding:'10px', borderRadius:'10px', cursor:'pointer',
+            fontFamily:'var(--fd)', fontSize:'13px', fontWeight:800, letterSpacing:'1px',
+            border:`1px solid ${!showAll ? 'var(--gold)' : 'var(--br)'}`,
+            background: !showAll ? 'rgba(255,200,0,.08)' : 'var(--gl)',
+            color: !showAll ? 'var(--gold)' : 'var(--text3)',
+          }}>
+          ⭐ FEATURED
+        </button>
+        <button
+          onClick={() => setShowAll(true)}
+          style={{
+            flex:1, padding:'10px', borderRadius:'10px', cursor:'pointer',
+            fontFamily:'var(--fd)', fontSize:'13px', fontWeight:800, letterSpacing:'1px',
+            border:`1px solid ${showAll ? 'var(--neon)' : 'var(--br)'}`,
+            background: showAll ? 'rgba(0,212,255,.08)' : 'var(--gl)',
+            color: showAll ? 'var(--neon)' : 'var(--text3)',
+          }}>
+          🛒 LIVE SERVICES ({totalCount.toLocaleString()})
         </button>
       </div>
 
-      {showAll && (
+      {/* ─── FEATURED TAB ─── */}
+      {!showAll && (
         <>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
-            <input className="srch-inp" style={{ flex: 1, minWidth: '140px' }}
-              placeholder="🔍 Search services..."
-              value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="sel" style={{ width: '150px', flexShrink: 0 }}
-              value={platform} onChange={e => setPlatform(e.target.value)}>
-              <option value="">🌐 All Platforms</option>
-              {availablePlatforms.map(p => (
-                <option key={p} value={p}>{ic(p)} {p}</option>
-              ))}
-            </select>
-          </div>
-
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>
-              <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>Loading services...
-            </div>
-          ) : filteredOthers.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>⏳ Loading...</div>
+          ) : featuredServices.length === 0 ? (
             <div className="empty">
-              <span className="empty-ic">🔍</span>
-              <div className="empty-tx">{otherServices.length === 0 ? 'No more services' : 'No services found'}</div>
-              <div className="empty-sb">Try different search or filter</div>
+              <span className="empty-ic">⭐</span>
+              <div className="empty-tx">No featured services yet</div>
+              <div className="empty-sb">Admin will feature top services here</div>
+              <button className="btn bgh bsm" style={{ marginTop:'12px' }} onClick={() => setShowAll(true)}>
+                Browse All Services →
+              </button>
             </div>
           ) : (
             <div className="mkt-grid">
-              {filteredOthers.map(s => <ServiceCard key={s.id} s={s} />)}
+              {featuredServices.map(s => <ServiceCard key={s.id} s={s} />)}
             </div>
           )}
         </>
       )}
 
-      {!loading && services.length === 0 && (
-        <div className="empty">
-          <span className="empty-ic">🛍</span>
-          <div className="empty-tx">No services available yet</div>
-          <div className="empty-sb">Admin is adding services soon</div>
-        </div>
+      {/* ─── LIVE SERVICES TAB ─── */}
+      {showAll && (
+        <>
+          {/* Platform selector */}
+          <div style={{ overflowX:'auto', paddingBottom:'8px', marginBottom:'12px' }}>
+            <div style={{ display:'flex', gap:'8px', minWidth:'max-content' }}>
+              <button onClick={() => setActivePlatform('')}
+                style={{
+                  padding:'8px 14px', borderRadius:'20px', cursor:'pointer',
+                  border:`1px solid ${!activePlatform ? 'var(--neon)' : 'var(--br)'}`,
+                  background: !activePlatform ? 'rgba(0,212,255,.12)' : 'var(--gl)',
+                  color: !activePlatform ? 'var(--neon)' : 'var(--text3)',
+                  fontSize:'12px', fontWeight:700, whiteSpace:'nowrap',
+                }}>🌐 Everything</button>
+              {platforms.map(p => (
+                <button key={p} onClick={() => setActivePlatform(p)}
+                  style={{
+                    padding:'8px 14px', borderRadius:'20px', cursor:'pointer',
+                    border:`1px solid ${activePlatform===p ? cl(p) : 'var(--br)'}`,
+                    background: activePlatform===p ? `${cl(p)}18` : 'var(--gl)',
+                    color: activePlatform===p ? cl(p) : 'var(--text3)',
+                    fontSize:'12px', fontWeight:700, whiteSpace:'nowrap',
+                  }}>{ic(p)} {p.charAt(0).toUpperCase()+p.slice(1)}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Service category */}
+          <div style={{ overflowX:'auto', paddingBottom:'6px', marginBottom:'12px' }}>
+            <div style={{ display:'flex', gap:'6px', minWidth:'max-content' }}>
+              {SERVICE_CATS.map(cat => (
+                <button key={cat} onClick={() => setActiveCategory(cat)}
+                  style={{
+                    padding:'6px 12px', borderRadius:'20px', cursor:'pointer',
+                    border:`1px solid ${activeCategory===cat ? 'var(--neon)' : 'var(--br)'}`,
+                    background: activeCategory===cat ? 'var(--neon)' : 'var(--gl)',
+                    color: activeCategory===cat ? '#000' : 'var(--text3)',
+                    fontSize:'11px', fontWeight:700, whiteSpace:'nowrap',
+                  }}>{cat}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Type tags filter */}
+          <div style={{ overflowX:'auto', paddingBottom:'6px', marginBottom:'12px' }}>
+            <div style={{ display:'flex', gap:'6px', minWidth:'max-content' }}>
+              {TYPE_TAGS.map(t => (
+                <button key={t.id} onClick={() => setActiveType(t.id)}
+                  style={{
+                    padding:'6px 12px', borderRadius:'20px', cursor:'pointer',
+                    border:`1px solid ${activeType===t.id ? 'var(--purple)' : 'var(--br)'}`,
+                    background: activeType===t.id ? 'rgba(123,47,255,.15)' : 'var(--gl)',
+                    color: activeType===t.id ? 'var(--purple)' : 'var(--text3)',
+                    fontSize:'11px', fontWeight:700, whiteSpace:'nowrap',
+                  }}>{t.label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Search + Sort row */}
+          <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
+            <input className="srch-inp" style={{ flex:1, minWidth:'160px' }}
+              placeholder="🔍 Search services..."
+              value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="sel" style={{ minWidth:'150px', flexShrink:0 }}
+              value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </div>
+
+          {/* Results count */}
+          <div style={{ fontSize:'11px', color:'var(--text3)', marginBottom:'12px' }}>
+            Showing {filteredNonFeatured.length} of {totalCount.toLocaleString()} services
+            {(activePlatform || activeType !== 'all' || search) &&
+              <button onClick={() => { setActivePlatform(''); setActiveType('all'); setSearch(''); setActiveCategory('All'); }}
+                style={{ marginLeft:'8px', background:'none', border:'none', color:'var(--neon)', cursor:'pointer', fontSize:'11px' }}>
+                ✕ Clear filters
+              </button>
+            }
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>⏳ Loading services...</div>
+          ) : filteredNonFeatured.length === 0 ? (
+            <div className="empty">
+              <span className="empty-ic">🔍</span>
+              <div className="empty-tx">No services found</div>
+              <div className="empty-sb">Try a different search or filter</div>
+            </div>
+          ) : (
+            <>
+              <div className="mkt-grid">
+                {filteredNonFeatured.map(s => <ServiceCard key={s.id} s={s} />)}
+              </div>
+
+              {/* Load More button */}
+              {hasMore && (
+                <div style={{ textAlign:'center', marginTop:'20px' }}>
+                  <button className="btn bgh bmd" onClick={loadMore} disabled={loadingMore}>
+                    {loadingMore ? '⏳ Loading...' : `Load More (${totalCount - offsetRef.current} remaining)`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
 
       {/* ─── ORDER MODAL ─── */}
       {selected && (
         <div className="mlay" onClick={() => !ordering && setSelected(null)}>
           <div className="mbox" onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <span style={{ fontSize: '28px' }}>{ic(selected.platform)}</span>
+            <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'16px' }}>
+              <span style={{ fontSize:'28px' }}>{ic(selected.platform)}</span>
               <div>
-                <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text)' }}>{selected.name}</div>
-                <div style={{ fontSize: '10px', color: cl(selected.platform), textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <div style={{ fontWeight:800, fontSize:'15px', color:'var(--text)' }}>{selected.name}</div>
+                <div style={{ fontSize:'10px', color:cl(selected.platform), textTransform:'uppercase', letterSpacing:'1px' }}>
                   {selected.platform}
                 </div>
               </div>
               <button onClick={() => !ordering && setSelected(null)}
-                style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '22px' }}>×</button>
+                style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'22px' }}>×</button>
             </div>
 
             {ordered ? (
-              <div style={{ textAlign: 'center', padding: '30px 0' }}>
-                <div style={{ fontSize: '40px', marginBottom: '12px' }}>✅</div>
-                <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: '15px', marginBottom: '6px' }}>Order Placed!</div>
-                <div style={{ color: 'var(--text3)', fontSize: '12px' }}>Processing automatically...</div>
+              <div style={{ textAlign:'center', padding:'30px 0' }}>
+                <div style={{ fontSize:'40px', marginBottom:'12px' }}>✅</div>
+                <div style={{ color:'var(--green)', fontWeight:700, fontSize:'15px', marginBottom:'6px' }}>Order Placed!</div>
+                <div style={{ color:'var(--text3)', fontSize:'12px' }}>Processing automatically...</div>
               </div>
             ) : (
               <>
+                {selected.description && (
+                  <div style={{ fontSize:'11px', color:'var(--text3)', marginBottom:'12px', padding:'8px 10px', background:'var(--gl)', borderRadius:'7px', border:'1px solid var(--br)', lineHeight:1.6 }}>
+                    {selected.description}
+                  </div>
+                )}
                 <div className="fi">
                   <label className="fl">Your Link / Username</label>
-                  <input
-                    className="inp"
-                    value={link}
+                  <input className="inp" value={link}
                     onChange={e => setLink(e.target.value)}
-                    placeholder="https://..."
-                    disabled={ordering}
-                  />
+                    placeholder="https://..." disabled={ordering} />
                 </div>
                 <div className="fi">
-                  <label className="fl">Quantity ({(selected.min_qty || 0).toLocaleString()} – {(selected.max_qty || 0).toLocaleString()})</label>
-                  <input
-                    className="inp"
-                    type="number"
-                    value={qty}
+                  <label className="fl">Quantity ({(selected.min_qty||0).toLocaleString()} – {(selected.max_qty||0).toLocaleString()})</label>
+                  <input className="inp" type="number" value={qty}
                     onChange={e => setQty(e.target.value)}
-                    min={selected.min_qty}
-                    max={selected.max_qty}
-                    step="1"
-                    disabled={ordering}
-                  />
+                    min={selected.min_qty} max={selected.max_qty} step="1" disabled={ordering} />
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '10px 13px', borderRadius: '8px', background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text2)' }}>Total Cost</span>
-                  <span style={{ fontFamily: 'var(--fm)', fontSize: '18px', fontWeight: 700, color: 'var(--gold)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', padding:'10px 13px', borderRadius:'8px', background:'rgba(0,0,0,.3)', border:'1px solid var(--br)' }}>
+                  <span style={{ fontSize:'11px', color:'var(--text2)' }}>Total Cost</span>
+                  <span style={{ fontFamily:'var(--fm)', fontSize:'18px', fontWeight:700, color:'var(--gold)' }}>
                     {format(parseFloat(displayCost))}
                   </span>
                 </div>
                 {orderError && (
-                  <div style={{ background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)', borderRadius: '7px', padding: '10px', color: '#ff6b6b', fontSize: '12px', marginBottom: '12px' }}>
+                  <div style={{ background:'rgba(255,50,80,.08)', border:'1px solid rgba(255,50,80,.2)', borderRadius:'7px', padding:'10px', color:'#ff6b6b', fontSize:'12px', marginBottom:'12px' }}>
                     {orderError}
                   </div>
                 )}
-                {/* FIX: button is disabled while ordering to prevent double-click */}
-                <button
-                  className="btn bp blg bw"
-                  onClick={placeOrder}
-                  disabled={ordering}
-                  style={{ opacity: ordering ? 0.6 : 1, cursor: ordering ? 'not-allowed' : 'pointer' }}>
+                <button className="btn bp blg bw" onClick={placeOrder} disabled={ordering}
+                  style={{ opacity:ordering?0.6:1, cursor:ordering?'not-allowed':'pointer' }}>
                   {ordering ? '⏳ Processing...' : `⚡ Place Order — ${format(parseFloat(displayCost))}`}
                 </button>
               </>
