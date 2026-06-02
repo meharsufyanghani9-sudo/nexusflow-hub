@@ -14,38 +14,35 @@ const providers = [
 const mapPlatform = (cat = '') => {
   const c = cat.toLowerCase();
   if (c.includes('instagram')) return 'instagram';
-  if (c.includes('tiktok'))    return 'tiktok';
-  if (c.includes('youtube'))   return 'youtube';
+  if (c.includes('tiktok')) return 'tiktok';
+  if (c.includes('youtube')) return 'youtube';
   if (c.includes('twitter') || c.includes(' x ')) return 'twitter';
-  if (c.includes('facebook'))  return 'facebook';
-  if (c.includes('telegram'))  return 'telegram';
-  if (c.includes('snapchat'))  return 'snapchat';
-  if (c.includes('linkedin'))  return 'linkedin';
+  if (c.includes('facebook')) return 'facebook';
+  if (c.includes('telegram')) return 'telegram';
+  if (c.includes('snapchat')) return 'snapchat';
+  if (c.includes('linkedin')) return 'linkedin';
   return 'custom';
 };
 
-// FIX: Proxy URL now reads from env variable — no hardcoded credentials
-const PROXY = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/proxy`;
-// FIX: Proxy secret read from env variable — never hardcoded
-const PROXY_SECRET = process.env.REACT_APP_PROXY_SECRET || '';
+const PROXY = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
 
 export default function AdminApiImport() {
-  const [tab, setTab]                   = useState('import');
-  const [provider, setProvider]         = useState('jap');
-  const [apiKey, setApiKey]             = useState('');
-  const [apiUrl, setApiUrl]             = useState(providers[0].url);
+  const [tab, setTab] = useState('import');
+  const [provider, setProvider] = useState('jap');
+  const [apiKey, setApiKey] = useState('');
+  const [apiUrl, setApiUrl] = useState(providers[0].url);
   const [fetchedServices, setFetchedServices] = useState([]);
-  const [loading, setLoading]           = useState(false);
-  const [importing, setImporting]       = useState(false);
-  const [selected, setSelected]         = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [selected, setSelected] = useState([]);
   const [searchFilter, setSearchFilter] = useState('');
-  const [msg, setMsg]                   = useState('');
-  const [msgType, setMsgType]           = useState('info');
+  const [msg, setMsg] = useState('');
+  const [msgType, setMsgType] = useState('info');
 
   // Our API tab
-  const [apiKeys, setApiKeys]   = useState([]);
+  const [apiKeys, setApiKeys] = useState([]);
   const [newLabel, setNewLabel] = useState('');
-  const [genKey, setGenKey]     = useState('');
+  const [genKey, setGenKey] = useState('');
   const [savingKey, setSavingKey] = useState(false);
 
   useEffect(() => {
@@ -60,37 +57,24 @@ export default function AdminApiImport() {
   };
 
   const fetchServices = async () => {
-    if (!apiKey.trim()) { setMsg('❌ Enter your API key'); setMsgType('error'); return; }
-    if (!apiUrl.trim()) { setMsg('❌ Enter API URL');      setMsgType('error'); return; }
-
-    // FIX: Validate URL format before sending to proxy
-    try {
-      const parsed = new URL(apiUrl.trim());
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        setMsg('❌ API URL must start with https://'); setMsgType('error'); return;
-      }
-    } catch {
-      setMsg('❌ Invalid API URL format'); setMsgType('error'); return;
-    }
-
+    if (!apiKey) { alert('Enter your API key'); return; }
+    if (!apiUrl) { alert('Enter API URL'); return; }
     setLoading(true);
     setFetchedServices([]);
     setSelected([]);
     setMsg('');
 
     try {
+      // Use our proxy to bypass CORS
       const res = await fetch(PROXY, {
         method: 'POST',
         headers: {
-          'Content-Type':    'application/json',
-          // FIX: Authorization header uses env variable — no hardcoded key in source
-          'Authorization':   `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`,
-          // FIX: Proxy secret sent in header for server-side authentication
-          'x-panel-secret':  PROXY_SECRET,
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
         },
         body: JSON.stringify({
-          url:    apiUrl.trim(),
-          key:    apiKey.trim(),
+          url: apiUrl,
+          key: apiKey,
           action: 'services',
         }),
       });
@@ -99,7 +83,7 @@ export default function AdminApiImport() {
 
       if (Array.isArray(data) && data.length > 0) {
         setFetchedServices(data);
-        setMsg(`✅ Successfully fetched ${data.length} services from provider!`);
+        setMsg(`✅ Successfully fetched ${data.length} real services from provider!`);
         setMsgType('success');
       } else if (data.error) {
         setMsg(`❌ Provider error: ${data.error}`);
@@ -119,7 +103,7 @@ export default function AdminApiImport() {
 
   const visibleServices = fetchedServices.filter(s =>
     !searchFilter ||
-    (s.name     || '').toLowerCase().includes(searchFilter.toLowerCase()) ||
+    (s.name || '').toLowerCase().includes(searchFilter.toLowerCase()) ||
     (s.category || '').toLowerCase().includes(searchFilter.toLowerCase())
   );
 
@@ -128,59 +112,37 @@ export default function AdminApiImport() {
   );
 
   const importSelected = async () => {
-    if (selected.length === 0) { setMsg('❌ Select at least one service'); setMsgType('error'); return; }
+    if (selected.length === 0) { alert('Select at least one service'); return; }
     setImporting(true);
-
     const toImport = fetchedServices.filter(s => selected.includes(s.service));
-
-    // FIX: Validate each service record before inserting — prevents zero-cost ghost services
-    const validServices = toImport.filter(s =>
-      s.service && s.name &&
-      parseFloat(s.rate) > 0 &&
-      parseInt(s.min)    > 0 &&
-      parseInt(s.max)    > parseInt(s.min)
-    );
-
-    if (validServices.length === 0) {
-      setMsg('⚠️ No valid services in selection — check that rate, min, and max are all correct.');
-      setMsgType('warn');
-      setImporting(false);
-      return;
-    }
-
     let count = 0;
     let errors = 0;
-
-    for (const s of validServices) {
-      // FIX: provider_api_key is stored server-side only — it is sent from this admin form
-      // but is NEVER readable by buyers because Marketplace.js uses a safe view without it.
+    for (const s of toImport) {
       const { error } = await supabase.from('services').insert({
-        name:                s.name,
-        platform:            mapPlatform(s.category || ''),
-        description:         `${s.category || 'SMM Service'} · Min: ${s.min} · Max: ${s.max}`,
-        price_per_1k:        parseFloat(s.rate) || 1,
-        min_qty:             parseInt(s.min)    || 100,
-        max_qty:             parseInt(s.max)    || 100000,
-        delivery_time:       s.average_time     || '1-6 hrs',
-        is_active:           true,
-        vendor_service_id:   String(s.service),
+        name: s.name,
+        platform: mapPlatform(s.category || ''),
+        description: `${s.category || 'SMM Service'} · Min: ${s.min} · Max: ${s.max}`,
+        price_per_1k: parseFloat(s.rate) || 1,
+        min_qty: parseInt(s.min) || 100,
+        max_qty: parseInt(s.max) || 100000,
+        delivery_time: s.average_time || '1-6 hrs',
+        is_active: true,
+        vendor_service_id: String(s.service),
         provider_service_id: String(s.service),
-        provider_api_url:    apiUrl.trim(),
-        provider_api_key:    apiKey.trim(),   // stored server-side, never sent to buyers
-        provider_id:         provider,
+        provider_api_url: apiUrl,
+        provider_api_key: apiKey,
+        provider_id: provider,
       });
       if (!error) count++;
       else errors++;
     }
-
     setImporting(false);
     setSelected([]);
-
     if (count > 0) {
-      setMsg(`✅ ${count} services imported!${errors > 0 ? ` (${errors} failed — may already exist)` : ''}`);
+      setMsg(`✅ ${count} services imported successfully! They are now live in the marketplace.${errors > 0 ? ` (${errors} failed)` : ''}`);
       setMsgType('success');
     } else {
-      setMsg('❌ Import failed. Services may already exist or have duplicate IDs.');
+      setMsg(`❌ Import failed. Services may already exist.`);
       setMsgType('error');
     }
     setTimeout(() => setMsg(''), 6000);
@@ -194,7 +156,7 @@ export default function AdminApiImport() {
   };
 
   const saveApiKey = async () => {
-    if (!newLabel || !genKey) { setMsg('❌ Generate a key and enter a label'); setMsgType('error'); return; }
+    if (!newLabel || !genKey) { alert('Generate a key and enter a label'); return; }
     setSavingKey(true);
     await supabase.from('api_keys').insert({
       label: newLabel, api_key: genKey, is_active: true
@@ -205,12 +167,13 @@ export default function AdminApiImport() {
   };
 
   const toggleApiKey = async (k) => {
-    await supabase.from('api_keys').update({ is_active: !k.is_active }).eq('id', k.id);
+    await supabase.from('api_keys')
+      .update({ is_active: !k.is_active }).eq('id', k.id);
     loadApiKeys();
   };
 
   const deleteApiKey = async (id) => {
-    if (!window.confirm('Delete this API key? Any panel using it will lose access.')) return;
+    if (!window.confirm('Delete this API key?')) return;
     await supabase.from('api_keys').delete().eq('id', id);
     loadApiKeys();
   };
@@ -218,10 +181,10 @@ export default function AdminApiImport() {
   const sel = providers.find(p => p.id === provider);
 
   const msgStyle = {
-    success: { bg: 'rgba(0,255,136,.08)', border: 'rgba(0,255,136,.25)', color: 'var(--green)'  },
-    error:   { bg: 'rgba(255,51,85,.08)', border: 'rgba(255,51,85,.25)', color: 'var(--danger)' },
-    warn:    { bg: 'rgba(255,184,0,.08)', border: 'rgba(255,184,0,.25)', color: 'var(--warn)'   },
-    info:    { bg: 'rgba(0,212,255,.08)', border: 'rgba(0,212,255,.25)', color: 'var(--neon)'   },
+    success: { bg: 'rgba(0,255,136,.08)', border: 'rgba(0,255,136,.25)', color: 'var(--green)' },
+    error: { bg: 'rgba(255,51,85,.08)', border: 'rgba(255,51,85,.25)', color: 'var(--danger)' },
+    warn: { bg: 'rgba(255,184,0,.08)', border: 'rgba(255,184,0,.25)', color: 'var(--warn)' },
+    info: { bg: 'rgba(0,212,255,.08)', border: 'rgba(0,212,255,.25)', color: 'var(--neon)' },
   }[msgType] || {};
 
   return (
@@ -242,7 +205,8 @@ export default function AdminApiImport() {
             <div style={{
               padding: '10px 14px', borderRadius: '8px', marginBottom: '14px',
               fontSize: '11px', lineHeight: 1.7,
-              background: msgStyle.bg, border: `1px solid ${msgStyle.border}`, color: msgStyle.color
+              background: msgStyle.bg, border: `1px solid ${msgStyle.border}`,
+              color: msgStyle.color
             }}>
               {msg}
             </div>
@@ -278,17 +242,16 @@ export default function AdminApiImport() {
                 placeholder="https://provider.com/api/v2" />
             </div>
             <div className="fi" style={{ marginBottom: '12px' }}>
-              <label className="fl">Your API Key (from provider dashboard)</label>
+              <label className="fl">Your API Key</label>
               <input className="inp" type="password" value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
-                placeholder="Paste your provider API key here" />
+                placeholder="Paste your API key from provider dashboard" />
             </div>
             <button className="btn bp bmd bw" onClick={fetchServices} disabled={loading}>
-              <span>{loading ? '⏳ Fetching Services...' : `🔌 Fetch from ${sel?.name}`}</span>
+              <span>{loading ? '⏳ Fetching Real Services...' : `🔌 Fetch from ${sel?.name}`}</span>
             </button>
             <div style={{ marginTop: '10px', fontSize: '10px', color: 'var(--text3)', lineHeight: 1.6 }}>
-              💡 Uses secure server-side proxy to call the provider API.
-              Your provider key is stored safely server-side and never shown to buyers.
+              💡 Uses secure server-side proxy to bypass browser restrictions. Real services from your provider will load.
             </div>
           </div>
 
@@ -296,7 +259,7 @@ export default function AdminApiImport() {
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                 <div className="st" style={{ marginBottom: 0 }}>
-                  {fetchedServices.length} Services fetched
+                  {fetchedServices.length} Real Services
                 </div>
                 <div style={{ display: 'flex', gap: '7px' }}>
                   <button className="btn bgh bsm" onClick={() =>
@@ -387,7 +350,7 @@ export default function AdminApiImport() {
               <div onClick={() => navigator.clipboard.writeText(genKey).then(() => alert('Copied!'))}
                 style={{ padding: '10px 13px', borderRadius: '7px', background: 'rgba(0,0,0,.45)', border: '1px solid var(--br2)', fontFamily: 'var(--fm)', fontSize: '10px', color: 'var(--green)', marginBottom: '12px', wordBreak: 'break-all', cursor: 'pointer', lineHeight: 1.6 }}>
                 {genKey}
-                <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '4px' }}>📋 Tap to copy · save this now, it will not be shown again!</div>
+                <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '4px' }}>📋 Tap to copy · save this now!</div>
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
