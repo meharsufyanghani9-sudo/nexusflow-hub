@@ -1,39 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import './style.css';
 import { supabase } from './supabase';
 import Landing from './Landing';
 import Auth from './Auth';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
-import BuyerDashboard from './BuyerDashboard';
-import Marketplace from './Marketplace';
-import Deposit from './Deposit';
-import Orders from './Orders';
-import Transactions from './Transactions';
-import Profile from './Profile';
-import Referral from './Referral';
-import Tasks from './Tasks';
-import PanelApi from './PanelApi';
-import AdminDashboard from './AdminDashboard';
-import AdminDeposits from './AdminDeposits';
-import AdminUsers from './AdminUsers';
-import AdminSettings from './AdminSettings';
-import AdminDisputes from './AdminDisputes';
-import AdminApiImport from './AdminApiImport';
-import AdminWithdrawals from './AdminWithdrawals';
-import AdminResellers from './AdminResellers';
-import AdminTasks from './AdminTasks';
-import AdminReferral from './AdminReferral';
-import AdminSupport from './AdminSupport';
-import AdminCurrencies from './AdminCurrencies';
-import AdminMassEmail from './AdminMassEmail';
-import AdminOrders from './AdminOrders';
-import AdminServices from './AdminServices';
-import ResellerDashboard from './ResellerDashboard';
-import ResellerServices from './ResellerServices';
-import ResellerEarnings from './ResellerEarnings';
-import SupportTicket from './SupportTicket';
 import CurrencySwitcher from './CurrencySwitcher';
+
+// ─── Lazy load all heavy pages ────────────────────────────
+const BuyerDashboard    = lazy(() => import('./BuyerDashboard'));
+const Marketplace       = lazy(() => import('./Marketplace'));
+const Deposit           = lazy(() => import('./Deposit'));
+const Orders            = lazy(() => import('./Orders'));
+const Transactions      = lazy(() => import('./Transactions'));
+const Profile           = lazy(() => import('./Profile'));
+const Referral          = lazy(() => import('./Referral'));
+const Tasks             = lazy(() => import('./Tasks'));
+const PanelApi          = lazy(() => import('./PanelApi'));
+const SupportTicket     = lazy(() => import('./SupportTicket'));
+const AdminDashboard    = lazy(() => import('./AdminDashboard'));
+const AdminDeposits     = lazy(() => import('./AdminDeposits'));
+const AdminUsers        = lazy(() => import('./AdminUsers'));
+const AdminSettings     = lazy(() => import('./AdminSettings'));
+const AdminDisputes     = lazy(() => import('./AdminDisputes'));
+const AdminApiImport    = lazy(() => import('./AdminApiImport'));
+const AdminWithdrawals  = lazy(() => import('./AdminWithdrawals'));
+const AdminResellers    = lazy(() => import('./AdminResellers'));
+const AdminTasks        = lazy(() => import('./AdminTasks'));
+const AdminReferral     = lazy(() => import('./AdminReferral'));
+const AdminSupport      = lazy(() => import('./AdminSupport'));
+const AdminCurrencies   = lazy(() => import('./AdminCurrencies'));
+const AdminMassEmail    = lazy(() => import('./AdminMassEmail'));
+const AdminOrders       = lazy(() => import('./AdminOrders'));
+const AdminServices     = lazy(() => import('./AdminServices'));
+const ResellerDashboard = lazy(() => import('./ResellerDashboard'));
+const ResellerServices  = lazy(() => import('./ResellerServices'));
+const ResellerEarnings  = lazy(() => import('./ResellerEarnings'));
 
 const pageTitles = {
   dashboard: 'Dashboard', marketplace: 'Marketplace',
@@ -86,6 +88,15 @@ async function generateUniqueUsername(baseName) {
   }
 }
 
+function PageLoader() {
+  return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'40vh', color:'var(--text3)', flexDirection:'column', gap:'12px' }}>
+      <div style={{ width:'32px', height:'32px', border:'3px solid var(--br)', borderTopColor:'var(--neon)', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />
+      <div style={{ fontSize:'11px', letterSpacing:'2px', fontFamily:'var(--fd)' }}>LOADING...</div>
+    </div>
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState('loading');
   const [authTab, setAuthTab] = useState('login');
@@ -95,15 +106,35 @@ export default function App() {
   const [showCurrency, setShowCurrency] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
 
+  // ─── History API: back button navigates within app ───────
+  const navigateTo = (newPage) => {
+    window.history.pushState({ page: newPage }, '', '#' + newPage);
+    setPage(newPage);
+  };
+
+  useEffect(() => {
+    const handlePopState = (e) => {
+      if (e.state && e.state.page) {
+        setPage(e.state.page);
+      } else {
+        setPage('dashboard');
+        window.history.replaceState({ page: 'dashboard' }, '', '#dashboard');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    if (!window.history.state) {
+      window.history.replaceState({ page: 'dashboard' }, '', '#dashboard');
+    }
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   useEffect(() => {
     supabase.from('settings').select('key').limit(1);
-
     const restoreSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const { data: profile } = await supabase
           .from('users').select('*').eq('id', session.user.id).maybeSingle();
-
         if (profile && profile.is_active !== false) {
           let username = profile.username;
           if (!username) {
@@ -126,7 +157,6 @@ export default function App() {
       setScreen('landing');
     };
     restoreSession();
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') { setUser(null); setScreen('landing'); setPage('dashboard'); }
       if (event === 'PASSWORD_RECOVERY') { setScreen('auth'); setAuthTab('login'); }
@@ -140,7 +170,7 @@ export default function App() {
   };
 
   const handleAuth = (tab) => { setAuthTab(tab); setScreen('auth'); };
-  const handleLogin = (u) => { setUser(u); setPage('dashboard'); setScreen('app'); };
+  const handleLogin = (u) => { setUser(u); navigateTo('dashboard'); setScreen('app'); };
 
   const toggleTheme = () => {
     const next = !darkMode;
@@ -150,10 +180,10 @@ export default function App() {
 
   if (screen === 'loading') {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', flexDirection:'column', gap:'16px' }}>
         <div className="gbg" />
-        <div style={{ fontFamily: 'var(--fd)', fontSize: '18px', letterSpacing: '4px', color: 'var(--neon)' }}>NEXUSFLOW HUB</div>
-        <div style={{ fontSize: '12px', color: 'var(--text3)', letterSpacing: '2px' }}>Loading...</div>
+        <div style={{ fontFamily:'var(--fd)', fontSize:'18px', letterSpacing:'4px', color:'var(--neon)' }}>NEXUSFLOW HUB</div>
+        <div style={{ fontSize:'12px', color:'var(--text3)', letterSpacing:'2px' }}>Loading...</div>
       </div>
     );
   }
@@ -168,50 +198,50 @@ export default function App() {
 
   const renderPage = () => {
     if (user.role === 'buyer') {
-      if (page === 'dashboard') return <BuyerDashboard user={user} onNav={setPage} />;
-      if (page === 'marketplace') return <Marketplace user={user} onNav={setPage} />;
-      if (page === 'deposit') return <Deposit user={user} />;
-      if (page === 'orders') return <Orders user={user} />;
+      if (page === 'dashboard')    return <BuyerDashboard user={user} onNav={navigateTo} />;
+      if (page === 'marketplace')  return <Marketplace user={user} onNav={navigateTo} />;
+      if (page === 'deposit')      return <Deposit user={user} />;
+      if (page === 'orders')       return <Orders user={user} />;
       if (page === 'transactions') return <Transactions user={user} />;
-      if (page === 'referral') return <Referral user={user} />;
-      if (page === 'tasks') return <Tasks user={user} />;
-      if (page === 'panelapi') return <PanelApi user={user} />;
+      if (page === 'referral')     return <Referral user={user} />;
+      if (page === 'tasks')        return <Tasks user={user} />;
+      if (page === 'panelapi')     return <PanelApi user={user} />;
       if (page === 'buyersupport') return <SupportTicket user={user} />;
-      if (page === 'profile') return <Profile user={user} onLogout={logout} />;
+      if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
     }
     if (user.role === 'admin') {
-      if (page === 'dashboard') return <AdminDashboard user={user} onNav={setPage} />;
-      if (page === 'adminorders') return <AdminOrders />;
+      if (page === 'dashboard')     return <AdminDashboard user={user} onNav={navigateTo} />;
+      if (page === 'adminorders')   return <AdminOrders />;
       if (page === 'adminservices') return <AdminServices />;
-      if (page === 'deposits') return <AdminDeposits />;
-      if (page === 'users') return <AdminUsers />;
-      if (page === 'settings') return <AdminSettings />;
-      if (page === 'disputes') return <AdminDisputes />;
-      if (page === 'api') return <AdminApiImport />;
-      if (page === 'withdrawals') return <AdminWithdrawals />;
-      if (page === 'resellers') return <AdminResellers />;
-      if (page === 'admintasks') return <AdminTasks />;
+      if (page === 'deposits')      return <AdminDeposits />;
+      if (page === 'users')         return <AdminUsers />;
+      if (page === 'settings')      return <AdminSettings />;
+      if (page === 'disputes')      return <AdminDisputes />;
+      if (page === 'api')           return <AdminApiImport />;
+      if (page === 'withdrawals')   return <AdminWithdrawals />;
+      if (page === 'resellers')     return <AdminResellers />;
+      if (page === 'admintasks')    return <AdminTasks />;
       if (page === 'adminreferral') return <AdminReferral />;
-      if (page === 'support') return <AdminSupport />;
-      if (page === 'currencies') return <AdminCurrencies />;
-      if (page === 'massemail') return <AdminMassEmail />;
-      if (page === 'profile') return <Profile user={user} onLogout={logout} />;
+      if (page === 'support')       return <AdminSupport />;
+      if (page === 'currencies')    return <AdminCurrencies />;
+      if (page === 'massemail')     return <AdminMassEmail />;
+      if (page === 'profile')       return <Profile user={user} onLogout={logout} />;
     }
     if (user.role === 'reseller') {
-      if (page === 'dashboard') return <ResellerDashboard user={user} onNav={setPage} />;
-      if (page === 'services') return <ResellerServices user={user} />;
-      if (page === 'earnings') return <ResellerEarnings user={user} />;
+      if (page === 'dashboard')    return <ResellerDashboard user={user} onNav={navigateTo} />;
+      if (page === 'services')     return <ResellerServices user={user} />;
+      if (page === 'earnings')     return <ResellerEarnings user={user} />;
       if (page === 'transactions') return <Transactions user={user} />;
-      if (page === 'deposit') return <Deposit user={user} />;
-      if (page === 'panelapi') return <PanelApi user={user} />;
-      if (page === 'profile') return <Profile user={user} onLogout={logout} />;
+      if (page === 'deposit')      return <Deposit user={user} />;
+      if (page === 'panelapi')     return <PanelApi user={user} />;
+      if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
     }
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: '12px', textAlign: 'center', padding: '20px' }}>
-        <div style={{ fontSize: '40px' }}>🚧</div>
-        <div style={{ fontFamily: 'var(--fd)', fontSize: '14px', color: 'var(--neon)', letterSpacing: '2px' }}>{pageTitles[page] || page}</div>
-        <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Coming soon</div>
-        <button className="btn bgh bsm" onClick={() => setPage('dashboard')}>← Back</button>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'50vh', gap:'12px', textAlign:'center', padding:'20px' }}>
+        <div style={{ fontSize:'40px' }}>🚧</div>
+        <div style={{ fontFamily:'var(--fd)', fontSize:'14px', color:'var(--neon)', letterSpacing:'2px' }}>{pageTitles[page] || page}</div>
+        <div style={{ fontSize:'12px', color:'var(--text3)' }}>Coming soon</div>
+        <button className="btn bgh bsm" onClick={() => navigateTo('dashboard')}>← Back</button>
       </div>
     );
   };
@@ -219,20 +249,22 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="gbg" />
-      <Sidebar user={user} page={page} onNav={setPage} open={sbOpen} onClose={() => setSbOpen(false)} />
+      <Sidebar user={user} page={page} onNav={navigateTo} open={sbOpen} onClose={() => setSbOpen(false)} />
       <main className="main">
         <Topbar
-          user={user} page={page} onNav={setPage} onLogout={logout}
+          user={user} page={page} onNav={navigateTo} onLogout={logout}
           onCurrency={() => setShowCurrency(true)} onTheme={toggleTheme}
           darkMode={darkMode} setSbOpen={setSbOpen}
         />
         <div className="page-content">
-          {renderPage()}
+          <Suspense fallback={<PageLoader />}>
+            {renderPage()}
+          </Suspense>
         </div>
       </main>
       <nav className="mobnav">
         {mobileNav.map(item => (
-          <div key={item.id} className={`mni ${page === item.id ? 'on' : ''}`} onClick={() => setPage(item.id)}>
+          <div key={item.id} className={`mni ${page === item.id ? 'on' : ''}`} onClick={() => navigateTo(item.id)}>
             <span className="mni-ic">{item.ic}</span>
             <span>{item.lb}</span>
           </div>
