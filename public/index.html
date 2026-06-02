@@ -1,14 +1,185 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#020408" />
-    <meta name="description" content="NexusFlow HUB — Multi-Vendor SMM Marketplace" />
-    <title>NexusFlow HUB</title>
-  </head>
-  <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
-  </body>
-</html>
+// NEXUSFLOW HUB — sync-orders Edge Function
+// Calls Vercel proxy to check order status (avoids IP blocking)
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+// Your Vercel proxy URL
+const PROXY_URL = "https://nexusflow-hub.shop/api/proxy";
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  const results = {
+    checked: 0, updated: 0, completed: 0,
+    cancelled: 0, errors: 0, refills_sent: 0,
+    details: [] as Array<string>,
+  };
+
+  try {
+    // Get active orders with vendor_order_id
+    const { data: orders, error: ordersErr } = await supabase
+      .from("orders")
+      .select("id, order_ref, vendor_order_id, status, progress, quantity, cost, user_id, refill_requested, service_id")
+      .in("status", ["pending", "in_progress"])
+      .not("vendor_order_id", "is", null)
+      .limit(100);
+
+    if (ordersErr) throw ordersErr;
+    if (!orders || orders.length === 0) {
+      return new Response(JSON.stringify({ message: "No active orders to sync", results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    results.checked = orders.length;
+
+    // Get service credentials
+    const serviceIds = [...new Set(orders.map((o: any) => o.service_id).filter(Boolean))];
+    const { data: services } = await supabase
+      .from("services")
+      .select("id, provider_api_url, provider_api_key")
+      .in("id", serviceIds);
+
+    const svcMap: Record<string, any> = {};
+    (services || []).forEach((s: any) => { svcMap[s.id] = s; });
+
+    for (const order of orders as any[]) {
+      const svc = svcMap[order.service_id];
+      if (!svc?.provider_api_url || !svc?.provider_api_key) {
+        results.errors++;
+        continue;
+      }
+
+      try {
+        // Call via Vercel proxy to avoid IP blocking
+        const proxyRes = await fetch(PROXY_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: svc.provider_api_url,
+            key: svc.provider_api_key,
+            action: "status",
+            order: String(order.vendor_order_id),
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+
+        if (!proxyRes.ok) {
+          results.errors++;
+          results.details.push(`Proxy error ${proxyRes.status} for ${order.order_ref}`);
+          continue;
+        }
+
+        const providerData = await proxyRes.json();
+        if (!providerData || providerData.error) {
+          results.errors++;
+          results.details.push(`Provider error for ${order.order_ref}: ${providerData?.error || 'unknown'}`);
+          continue;
+        }
+
+        // Map status
+        const rawStatus = (providerData.status || "").toLowerCase().replace(/\s+/g, "");
+        const startCount = parseInt(providerData.start_count || "0") || 0;
+        const remains = parseInt(providerData.remains || "0") || 0;
+        const qty = order.quantity || 1;
+
+        let newStatus = order.status;
+        let newProgress = order.progress || 0;
+
+        if (rawStatus.includes("complet")) { newStatus = "completed"; newProgress = 100; }
+        else if (rawStatus.includes("cancel")) { newStatus = "cancelled"; }
+        else if (rawStatus.includes("partial")) {
+          newStatus = "in_progress";
+          newProgress = Math.min(99, Math.round(((qty - remains) / qty) * 100));
+        } else if (rawStatus.includes("progress") || rawStatus.includes("processing") || rawStatus.includes("active")) {
+          newStatus = "in_progress";
+          newProgress = remains > 0 ? Math.min(99, Math.round(((qty - remains) / qty) * 100)) : Math.max(newProgress, 10);
+        } else if (rawStatus.includes("pending")) {
+          newStatus = "pending"; newProgress = 0;
+        }
+
+        // Always update start_count and remains
+        const updateData: any = {
+          status: newStatus, progress: newProgress,
+          start_count: startCount, remains: remains,
+          provider_note: `Synced: ${providerData.status || rawStatus} | Remains: ${remains}`,
+        };
+
+        await supabase.from("orders").update(updateData).eq("id", order.id);
+        results.updated++;
+
+        if (newStatus === "completed") {
+          results.completed++;
+          results.details.push(`✅ Order ${order.order_ref} completed`);
+        } else if (newStatus === "cancelled") {
+          results.cancelled++;
+          // Auto-refund
+          const { data: userData } = await supabase.from("users").select("balance").eq("id", order.user_id).maybeSingle();
+          if (userData) {
+            const refundAmount = parseFloat(order.cost || "0");
+            await supabase.from("users").update({ balance: parseFloat(userData.balance || "0") + refundAmount }).eq("id", order.user_id);
+            await supabase.from("transactions").insert({
+              user_id: order.user_id, type: "refund", amount: refundAmount,
+              description: `Auto-refund: Order ${order.order_ref} cancelled`,
+              ref_id: "AUTO-REF-" + order.id,
+            });
+          }
+          results.details.push(`❌ Order ${order.order_ref} cancelled + refunded`);
+        }
+
+        // Handle refill
+        if (order.refill_requested && newStatus === "completed") {
+          try {
+            const refillRes = await fetch(PROXY_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                url: svc.provider_api_url, key: svc.provider_api_key,
+                action: "refill", order: String(order.vendor_order_id),
+              }),
+            });
+            const refillData = await refillRes.json();
+            if (refillData.refill) {
+              await supabase.from("orders").update({
+                refill_requested: false,
+                provider_note: `Refill sent. ID: ${refillData.refill}`,
+                status: "in_progress", progress: 0,
+              }).eq("id", order.id);
+              results.refills_sent++;
+              results.details.push(`🔄 Refill sent for ${order.order_ref}`);
+            }
+          } catch (_e) {
+            results.details.push(`Refill failed for ${order.order_ref}`);
+          }
+        }
+
+      } catch (err) {
+        results.errors++;
+        results.details.push(`Error on ${order.order_ref}: ${(err as Error).message}`);
+      }
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, timestamp: new Date().toISOString(), results }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: (err as Error).message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
