@@ -39,15 +39,30 @@ export default function AdminApiImport() {
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('info');
 
+  // Markup settings
+  const [markupPercent, setMarkupPercent] = useState(0);
+
   // Our API tab
   const [apiKeys, setApiKeys] = useState([]);
   const [newLabel, setNewLabel] = useState('');
   const [genKey, setGenKey] = useState('');
   const [savingKey, setSavingKey] = useState(false);
 
+  useEffect(() => { loadMarkup(); }, []);
   useEffect(() => {
     if (tab === 'ourapi') loadApiKeys();
   }, [tab]);
+
+  const loadMarkup = async () => {
+    const { data } = await supabase.from('settings').select('value').eq('key', 'api_markup_percent').single();
+    if (data?.value) setMarkupPercent(parseFloat(data.value) || 0);
+  };
+
+  // Apply markup to a price
+  const applyMarkup = (price) => {
+    const p = parseFloat(price) || 0;
+    return markupPercent > 0 ? p * (1 + markupPercent / 100) : p;
+  };
 
   const loadApiKeys = async () => {
     const { data } = await supabase
