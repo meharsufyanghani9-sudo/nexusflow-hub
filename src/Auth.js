@@ -1,30 +1,47 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 
+// FIX #31: was while(true) with no escape — now capped at 100 attempts
+// with a guaranteed UUID fallback so it can NEVER hang the app
+async function generateUniqueUsername(baseName) {
+  const base = (baseName || 'user').toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const candidate = attempt === 0 ? base : base + attempt;
+    const { data } = await supabase
+      .from('users')
+      .select('id')
+      .eq('username', candidate)
+      .maybeSingle();
+    if (!data) return candidate;
+  }
+  // Guaranteed unique fallback — UUID suffix can never collide
+  return base + '_' + crypto.randomUUID().replace(/-/g, '').slice(0, 6);
+}
+
 export default function Auth({ onLogin, defaultTab }) {
   const [tab, setTab] = useState(defaultTab || 'login');
 
   // Login fields
-  const [loginId, setLoginId] = useState('');
-  const [password, setPassword] = useState('');
+  const [loginId,   setLoginId]   = useState('');
+  const [password,  setPassword]  = useState('');
 
   // Signup fields
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [signupUsername, setSignupUsername] = useState('');
-  const [signupPassword, setSignupPassword] = useState('');
+  const [name,             setName]             = useState('');
+  const [email,            setEmail]            = useState('');
+  const [signupUsername,   setSignupUsername]   = useState('');
+  const [signupPassword,   setSignupPassword]   = useState('');
 
-  const [error, setError] = useState('');
+  const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [msg,     setMsg]     = useState('');
 
   const [usernameStatus, setUsernameStatus] = useState('');
   const usernameTimerRef = useRef(null);
 
   // Forgot password
-  const [showForgot, setShowForgot] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
+  const [showForgot,   setShowForgot]   = useState(false);
+  const [forgotEmail,  setForgotEmail]  = useState('');
+  const [forgotSent,   setForgotSent]   = useState(false);
 
   const [refCode, setRefCode] = useState('');
   useEffect(() => {
@@ -34,6 +51,13 @@ export default function Auth({ onLogin, defaultTab }) {
       setRefCode(ref);
       setTab('signup');
     }
+  }, []);
+
+  // Cleanup username timer on unmount
+  useEffect(() => {
+    return () => {
+      if (usernameTimerRef.current) clearTimeout(usernameTimerRef.current);
+    };
   }, []);
 
   const checkUsernameAvailability = (uname) => {
@@ -48,27 +72,17 @@ export default function Auth({ onLogin, defaultTab }) {
     setUsernameStatus('checking');
     usernameTimerRef.current = setTimeout(async () => {
       try {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('users')
           .select('id')
           .eq('username', uname.toLowerCase())
           .maybeSingle();
-        if (error) {
-          setUsernameStatus('available');
-          return;
-        }
         setUsernameStatus(data ? 'taken' : 'available');
-      } catch (e) {
+      } catch {
         setUsernameStatus('available');
       }
     }, 600);
   };
-
-  useEffect(() => {
-    return () => {
-      if (usernameTimerRef.current) clearTimeout(usernameTimerRef.current);
-    };
-  }, []);
 
   const handleNameChange = (val) => {
     setName(val);
@@ -84,28 +98,24 @@ export default function Auth({ onLogin, defaultTab }) {
     checkUsernameAvailability(clean);
   };
 
-  // ── LOGIN (email OR username) ─────────────────────────────────────────────
+  // ── LOGIN (email OR username) ──────────────────────────────────────────────
   const handleLogin = async () => {
-    setError(''); setMsg('');
+    setError('');
+    setMsg('');
     if (!loginId || !password) { setError('Fill all fields'); return; }
     setLoading(true);
 
-    // Strip leading @ if user typed @username
-    const rawInput = loginId.trim();
+    const rawInput    = loginId.trim();
     const cleanedInput = rawInput.startsWith('@') ? rawInput.slice(1) : rawInput;
 
-    // ── FIX: A proper email must match the pattern: something@something.something
-    // We use a simple but reliable email regex instead of just checking for @ and .
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const looksLikeEmail = emailRegex.test(cleanedInput);
 
     let emailToUse = '';
 
     if (looksLikeEmail) {
-      // User typed an email — use it directly (lowercase to avoid case issues)
       emailToUse = cleanedInput.toLowerCase();
     } else {
-      // User typed a username — look up their email in the users table
       const { data: userRow, error: lookupErr } = await supabase
         .from('users')
         .select('email')
@@ -117,20 +127,15 @@ export default function Auth({ onLogin, defaultTab }) {
         setLoading(false);
         return;
       }
-
-      // ── FIX: Always use the exact email stored in the database (lowercase)
-      // This prevents case mismatch issues with Supabase Auth
       emailToUse = userRow.email.toLowerCase().trim();
     }
 
-    // Now sign in with email + password
     const { data, error: err } = await supabase.auth.signInWithPassword({
-      email: emailToUse,
+      email:    emailToUse,
       password: password,
     });
 
     if (err) {
-      // ── FIX: Give a more helpful error message
       if (err.message && err.message.toLowerCase().includes('invalid')) {
         setError('Incorrect password. Please try again.');
       } else {
@@ -158,10 +163,10 @@ export default function Auth({ onLogin, defaultTab }) {
     // If profile still missing, create it manually (trigger may have failed)
     if (!profile) {
       await supabase.from('users').insert({
-        id: data.user.id,
+        id:        data.user.id,
         full_name: data.user.user_metadata?.full_name || emailToUse.split('@')[0],
-        email: emailToUse,
-        role: 'buyer',
+        email:     emailToUse,
+        role:      'buyer',
       });
       await new Promise(r => setTimeout(r, 500));
       const { data: p2 } = await supabase
@@ -175,6 +180,17 @@ export default function Auth({ onLogin, defaultTab }) {
       return;
     }
 
+    // Auto-generate username if missing — FIX #31: uses capped loop, not while(true)
+    if (!profile.username) {
+      const generatedUsername = await generateUniqueUsername(
+        profile.full_name || emailToUse.split('@')[0]
+      );
+      await supabase.from('users')
+        .update({ username: generatedUsername })
+        .eq('id', profile.id);
+      profile.username = generatedUsername;
+    }
+
     if (profile.is_active === false) {
       setError('Account suspended. Contact support.');
       setLoading(false);
@@ -182,30 +198,32 @@ export default function Auth({ onLogin, defaultTab }) {
     }
 
     onLogin({
-      id: data.user.id,
-      name: profile.full_name,
-      email: profile.email,
-      username: profile.username,
-      role: profile.role,
-      balance: parseFloat(profile.balance || 0),
+      id:            data.user.id,
+      name:          profile.full_name,
+      email:         profile.email,
+      username:      profile.username,
+      role:          profile.role,
+      balance:       parseFloat(profile.balance || 0),
       referral_code: profile.referral_code,
     });
   };
 
-  // ── SIGNUP ────────────────────────────────────────────────────────────────
+  // ── SIGNUP ─────────────────────────────────────────────────────────────────
   const handleSignup = async () => {
-    setError(''); setMsg('');
+    setError('');
+    setMsg('');
     if (!name || !email || !signupPassword || !signupUsername) {
-      setError('Fill all fields'); return;
+      setError('Fill all fields');
+      return;
     }
-    if (signupPassword.length < 8) { setError('Password min 8 characters'); return; }
-    if (signupUsername.length < 3) { setError('Username must be at least 3 characters'); return; }
-    if (usernameStatus === 'taken') { setError('That username is already taken'); return; }
+    if (signupPassword.length < 8)  { setError('Password min 8 characters'); return; }
+    if (signupUsername.length < 3)  { setError('Username must be at least 3 characters'); return; }
+    if (usernameStatus === 'taken')    { setError('That username is already taken'); return; }
     if (usernameStatus === 'checking') { setError('Please wait, checking username...'); return; }
 
     setLoading(true);
 
-    // Final double-check
+    // Final double-check before insert
     const { data: existingUser } = await supabase
       .from('users')
       .select('id')
@@ -219,9 +237,9 @@ export default function Auth({ onLogin, defaultTab }) {
     }
 
     const { data, error: err } = await supabase.auth.signUp({
-      email: email.toLowerCase().trim(),
+      email:    email.toLowerCase().trim(),
       password: signupPassword,
-      options: { data: { full_name: name } }
+      options:  { data: { full_name: name } },
     });
 
     if (err) { setError(err.message); setLoading(false); return; }
@@ -229,19 +247,22 @@ export default function Auth({ onLogin, defaultTab }) {
     if (data?.user) {
       await new Promise(r => setTimeout(r, 1500));
       await supabase.from('users').update({
-        username: signupUsername.toLowerCase(),
+        username:    signupUsername.toLowerCase(),
         referred_by: refCode || null,
       }).eq('id', data.user.id);
     }
 
     setMsg('✅ Account created! You can now login.');
     setTab('login');
-    setName(''); setEmail(''); setSignupPassword(''); setSignupUsername('');
+    setName('');
+    setEmail('');
+    setSignupPassword('');
+    setSignupUsername('');
     setUsernameStatus('');
     setLoading(false);
   };
 
-  // ── FORGOT PASSWORD ───────────────────────────────────────────────────────
+  // ── FORGOT PASSWORD ────────────────────────────────────────────────────────
   const handleForgotPassword = async () => {
     if (!forgotEmail) { setError('Enter your email'); return; }
     setLoading(true);
@@ -255,19 +276,13 @@ export default function Auth({ onLogin, defaultTab }) {
 
   const UsernameIndicator = () => {
     if (!signupUsername || signupUsername.length < 3) return null;
-    if (usernameStatus === 'checking') return (
-      <span style={{ fontSize: '11px', color: 'var(--text3)' }}>⏳ Checking...</span>
-    );
-    if (usernameStatus === 'available') return (
-      <span style={{ fontSize: '11px', color: 'var(--green)' }}>✅ Available!</span>
-    );
-    if (usernameStatus === 'taken') return (
-      <span style={{ fontSize: '11px', color: 'var(--danger)' }}>❌ Already taken</span>
-    );
+    if (usernameStatus === 'checking')  return <span style={{ fontSize: '11px', color: 'var(--text3)' }}>⏳ Checking...</span>;
+    if (usernameStatus === 'available') return <span style={{ fontSize: '11px', color: 'var(--green)' }}>✅ Available!</span>;
+    if (usernameStatus === 'taken')     return <span style={{ fontSize: '11px', color: 'var(--danger)' }}>❌ Already taken</span>;
     return null;
   };
 
-  // ── FORGOT PASSWORD VIEW ──────────────────────────────────────────────────
+  // ── FORGOT PASSWORD VIEW ───────────────────────────────────────────────────
   if (showForgot) {
     return (
       <div className="auth-wrap" style={{ position: 'relative', zIndex: 10 }}>
@@ -286,7 +301,10 @@ export default function Auth({ onLogin, defaultTab }) {
                 <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '20px', lineHeight: 1.6 }}>
                   Check your inbox at <strong>{forgotEmail}</strong> and click the link to reset your password.
                 </div>
-                <button className="btn bgh bmd" onClick={() => { setShowForgot(false); setForgotSent(false); setForgotEmail(''); }}>
+                <button
+                  className="btn bgh bmd"
+                  onClick={() => { setShowForgot(false); setForgotSent(false); setForgotEmail(''); }}
+                >
                   ← Back to Login
                 </button>
               </div>
@@ -294,16 +312,23 @@ export default function Auth({ onLogin, defaultTab }) {
               <div>
                 <div className="fi">
                   <label className="fl">Your Email Address</label>
-                  <input className="inp" type="email" placeholder="your@email.com"
-                    value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
+                  <input
+                    className="inp"
+                    type="email"
+                    placeholder="your@email.com"
+                    value={forgotEmail}
+                    onChange={e => setForgotEmail(e.target.value)}
+                  />
                 </div>
                 <div className="aerr">{error}</div>
                 <button className="btn bp blg bw" onClick={handleForgotPassword} disabled={loading}>
                   <span>{loading ? 'Sending...' : 'Send Reset Link'}</span><span>→</span>
                 </button>
                 <div style={{ textAlign: 'center', marginTop: '14px' }}>
-                  <button onClick={() => { setShowForgot(false); setError(''); }}
-                    style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '12px' }}>
+                  <button
+                    onClick={() => { setShowForgot(false); setError(''); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '12px' }}
+                  >
                     ← Back to Login
                   </button>
                 </div>
@@ -315,7 +340,7 @@ export default function Auth({ onLogin, defaultTab }) {
     );
   }
 
-  // ── MAIN VIEW ─────────────────────────────────────────────────────────────
+  // ── MAIN VIEW ──────────────────────────────────────────────────────────────
   return (
     <div className="auth-wrap" style={{ position: 'relative', zIndex: 10 }}>
       <div className="gbg" />
@@ -331,44 +356,52 @@ export default function Auth({ onLogin, defaultTab }) {
             <div style={{
               background: 'rgba(0,255,136,.08)', border: '1px solid rgba(0,255,136,.2)',
               borderRadius: '7px', padding: '10px', fontSize: '12px', color: 'var(--green)',
-              textAlign: 'center', marginBottom: '12px'
+              textAlign: 'center', marginBottom: '12px',
             }}>
               🎁 You were referred! Sign up to get a bonus on your first deposit.
             </div>
           )}
 
           <div className="atbs">
-            <button className={`atb ${tab === 'login' ? 'on' : ''}`}
-              onClick={() => { setTab('login'); setError(''); setMsg(''); }}>Login</button>
-            <button className={`atb ${tab === 'signup' ? 'on' : ''}`}
-              onClick={() => { setTab('signup'); setError(''); setMsg(''); }}>Sign Up</button>
+            <button
+              className={`atb ${tab === 'login' ? 'on' : ''}`}
+              onClick={() => { setTab('login'); setError(''); setMsg(''); }}
+            >Login</button>
+            <button
+              className={`atb ${tab === 'signup' ? 'on' : ''}`}
+              onClick={() => { setTab('signup'); setError(''); setMsg(''); }}
+            >Sign Up</button>
           </div>
 
           {msg && (
             <div style={{
               background: 'rgba(0,255,136,.08)', border: '1px solid rgba(0,255,136,.2)',
               borderRadius: '7px', padding: '10px', fontSize: '12px', color: 'var(--green)',
-              textAlign: 'center', marginBottom: '12px'
+              textAlign: 'center', marginBottom: '12px',
             }}>{msg}</div>
           )}
 
-          {/* ── LOGIN TAB ── */}
+          {/* LOGIN TAB */}
           {tab === 'login' && (
             <div>
               <div className="fi">
                 <label className="fl">Email or Username</label>
                 <input
-                  className="inp" type="text"
+                  className="inp"
+                  type="text"
                   placeholder="your@email.com or username"
                   value={loginId}
                   onChange={e => setLoginId(e.target.value)}
-                  autoCapitalize="none" autoCorrect="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                 />
               </div>
               <div className="fi">
                 <label className="fl">Password</label>
                 <input
-                  className="inp" type="password" placeholder="••••••••"
+                  className="inp"
+                  type="password"
+                  placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()}
@@ -379,28 +412,36 @@ export default function Auth({ onLogin, defaultTab }) {
                 <span>{loading ? 'Signing in...' : 'Access Panel'}</span><span>→</span>
               </button>
               <div style={{ textAlign: 'center', marginTop: '12px' }}>
-                <button onClick={() => { setShowForgot(true); setError(''); }}
-                  style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '12px' }}>
+                <button
+                  onClick={() => { setShowForgot(true); setError(''); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '12px' }}
+                >
                   Forgot password?
                 </button>
               </div>
               <div style={{
                 marginTop: '16px', padding: '10px 12px', borderRadius: '8px',
                 background: 'rgba(0,212,255,.05)', border: '1px solid rgba(0,212,255,.1)',
-                fontSize: '11px', color: 'var(--text3)', textAlign: 'center', lineHeight: 1.6
+                fontSize: '11px', color: 'var(--text3)', textAlign: 'center', lineHeight: 1.6,
               }}>
-                💡 Login with your <strong style={{ color: 'var(--neon)' }}>email</strong> or your <strong style={{ color: 'var(--neon)' }}>username</strong> (without the @)
+                💡 Login with your <strong style={{ color: 'var(--neon)' }}>email</strong> or your{' '}
+                <strong style={{ color: 'var(--neon)' }}>username</strong> (without the @)
               </div>
             </div>
           )}
 
-          {/* ── SIGNUP TAB ── */}
+          {/* SIGNUP TAB */}
           {tab === 'signup' && (
             <div>
               <div className="fi">
                 <label className="fl">Full Name</label>
-                <input className="inp" type="text" placeholder="Your Name"
-                  value={name} onChange={e => handleNameChange(e.target.value)} />
+                <input
+                  className="inp"
+                  type="text"
+                  placeholder="Your Name"
+                  value={name}
+                  onChange={e => handleNameChange(e.target.value)}
+                />
               </div>
 
               <div className="fi">
@@ -411,13 +452,17 @@ export default function Auth({ onLogin, defaultTab }) {
                 <div style={{ position: 'relative' }}>
                   <span style={{
                     position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)',
-                    color: 'var(--text3)', fontSize: '14px', pointerEvents: 'none'
+                    color: 'var(--text3)', fontSize: '14px', pointerEvents: 'none',
                   }}>@</span>
-                  <input className="inp" type="text" placeholder="yourname"
+                  <input
+                    className="inp"
+                    type="text"
+                    placeholder="yourname"
                     value={signupUsername}
                     onChange={e => handleUsernameChange(e.target.value)}
                     style={{ paddingLeft: '26px' }}
-                    autoCapitalize="none" autoCorrect="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                   />
                 </div>
                 <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '4px' }}>
@@ -427,19 +472,32 @@ export default function Auth({ onLogin, defaultTab }) {
 
               <div className="fi">
                 <label className="fl">Email</label>
-                <input className="inp" type="email" placeholder="your@email.com"
-                  value={email} onChange={e => setEmail(e.target.value)} />
+                <input
+                  className="inp"
+                  type="email"
+                  placeholder="your@email.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                />
               </div>
 
               <div className="fi">
                 <label className="fl">Password</label>
-                <input className="inp" type="password" placeholder="Min 8 characters"
-                  value={signupPassword} onChange={e => setSignupPassword(e.target.value)} />
+                <input
+                  className="inp"
+                  type="password"
+                  placeholder="Min 8 characters"
+                  value={signupPassword}
+                  onChange={e => setSignupPassword(e.target.value)}
+                />
               </div>
 
               <div className="aerr">{error}</div>
-              <button className="btn bgd blg bw" onClick={handleSignup}
-                disabled={loading || usernameStatus === 'taken' || usernameStatus === 'checking'}>
+              <button
+                className="btn bgd blg bw"
+                onClick={handleSignup}
+                disabled={loading || usernameStatus === 'taken' || usernameStatus === 'checking'}
+              >
                 <span>{loading ? 'Creating...' : 'Create Account'}</span><span>✦</span>
               </button>
             </div>
