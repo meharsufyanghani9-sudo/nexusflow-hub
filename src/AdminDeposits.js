@@ -1,18 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-// ─── CURRENCY HELPER ────────────────────────────────────────────────────────
-// BUG FIX: The original code was showing deposit amounts with a "$" symbol
-// even for PKR deposits. Admin was seeing "10 USD" when user deposited "10 PKR".
-// This helper now correctly shows the original deposit currency to admin.
+// Helper: detect currency from deposit method and show correct symbol
 function depositDisplay(dep) {
   const method = (dep.method || '').toLowerCase();
   const amt = parseFloat(dep.amount || 0);
   if (method.includes('binance') || method.includes('usdt')) {
-    return { label: `$${amt.toFixed(2)} USDT`, color: '#F0B90B', isFiat: false };
+    return { label: `$${amt.toFixed(2)} USDT`, color: '#F0B90B' };
   }
-  // Easypaisa, JazzCash → PKR (original currency user paid in)
-  return { label: `₨${amt.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} PKR`, color: '#4CAF50', isFiat: true };
+  return { label: `₨${amt.toLocaleString()} PKR`, color: '#4CAF50' };
 }
 
 export default function AdminDeposits() {
@@ -24,146 +20,191 @@ export default function AdminDeposits() {
   const [acting, setActing] = useState(false);
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('');
-  // PKR rate cache to avoid fetching repeatedly
-  const [pkrRate, setPkrRate] = useState(null);
 
-  useEffect(() => {
-    loadDeposits();
-    loadPkrRate();
-  }, []);
+  useEffect(() => { loadDeposits(); }, []);
 
-  const loadPkrRate = async () => {
-    const { data } = await supabase
-      .from('currencies').select('rate').eq('code', 'PKR').single();
-    if (data) setPkrRate(parseFloat(data.rate) || 278);
-  };
-
-  const loadDeposits = useCallback(async () => {
+  const loadDeposits = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('deposits')
       .select('*, users(full_name, email, referred_by)')
       .order('created_at', { ascending: false });
     if (error) {
-      showMsg('❌ Failed to load: ' + error.message, 'err');
+      showMsg('❌ Failed to load deposits.', 'err');
     } else {
       setDeposits(data || []);
     }
     setLoading(false);
-  }, []);
-
-  const showMsg = (text, type = 'ok') => {
-    setMsg(text); setMsgType(type);
-    setTimeout(() => setMsg(''), 6000);
   };
 
-  // ─── APPROVE ────────────────────────────────────────────────────────────────
-  // BUG FIX: The original code had the PKR→USD conversion logic but the UI
-  // summary card was still showing "$10" for a "₨10 PKR" deposit.
-  // We also now re-fetch PKR rate at approval time for accuracy.
+  const showMsg = (text, type = 'ok') => {
+    setMsg(text);
+    setMsgType(type);
+    setTimeout(() => setMsg(''), 5000);
+  };
+
   const approve = async (dep) => {
     setActing(true);
 
+    // FIX #6: idempotency guard — re-fetch deposit status from DB before ANY balance operation
+    // This prevents double-approval if admin double-clicks or two admins act simultaneously
+    const { data: freshDep, error: freshErr } = await supabase
+      .from('deposits')
+      .select('status')
+      .eq('id', dep.id)
+      .single();
+
+    if (freshErr || !freshDep) {
+      showMsg('❌ Could not verify deposit status. Please refresh.', 'err');
+      setActing(false);
+      return;
+    }
+
+    if (freshDep.status === 'approved') {
+      showMsg('⚠️ This deposit has already been approved. No changes made.', 'err');
+      setActing(false);
+      setSelected(null);
+      loadDeposits();
+      return;
+    }
+
+    if (freshDep.status === 'rejected') {
+      showMsg('⚠️ This deposit was already rejected. Cannot approve a rejected deposit.', 'err');
+      setActing(false);
+      setSelected(null);
+      loadDeposits();
+      return;
+    }
+
+    // Get user's current balance (fresh from DB, not stale state)
     const { data: u, error: uErr } = await supabase
-      .from('users').select('balance, referred_by').eq('id', dep.user_id).single();
+      .from('users')
+      .select('balance, referred_by')
+      .eq('id', dep.user_id)
+      .single();
 
     if (uErr || !u) {
       showMsg('❌ Could not find user.', 'err');
-      setActing(false); return;
+      setActing(false);
+      return;
     }
 
+    // Convert deposit amount to USD
     const method = (dep.method || '').toLowerCase();
     const isBinance = method.includes('binance') || method.includes('usdt');
     const rawAmount = parseFloat(dep.amount || 0);
 
     let usdAmount;
     if (isBinance) {
-      usdAmount = rawAmount; // USDT = USD 1:1
+      // Binance USDT = USD 1:1
+      usdAmount = rawAmount;
     } else {
-      // PKR → USD conversion
-      // Fetch fresh rate at approval time
+      // PKR → USD: fetch current rate from currencies table
       const { data: pkrRow } = await supabase
-        .from('currencies').select('rate').eq('code', 'PKR').single();
-      const rate = parseFloat(pkrRow?.rate || pkrRate || 278);
-      usdAmount = rawAmount / rate;
+        .from('currencies')
+        .select('rate')
+        .eq('code', 'PKR')
+        .single();
+      const pkrRate = parseFloat(pkrRow?.rate || 278);
+      usdAmount = rawAmount / pkrRate;
     }
 
     const usdAmountRounded = parseFloat(usdAmount.toFixed(4));
-    const currentBalance = parseFloat(u.balance || 0);
-    const newBalance = parseFloat((currentBalance + usdAmountRounded).toFixed(4));
+    const newBalance = parseFloat(u.balance || 0) + usdAmountRounded;
 
     // Credit user balance in USD
     const { error: balErr } = await supabase
-      .from('users').update({ balance: newBalance }).eq('id', dep.user_id);
+      .from('users')
+      .update({ balance: newBalance })
+      .eq('id', dep.user_id);
 
     if (balErr) {
-      showMsg('❌ Failed to credit: ' + balErr.message, 'err');
-      setActing(false); return;
+      showMsg('❌ Failed to credit balance: ' + balErr.message, 'err');
+      setActing(false);
+      return;
     }
 
-    // Transaction record — store USD amount; description notes original currency
-    const { label } = depositDisplay(dep);
+    // Transaction record
     await supabase.from('transactions').insert({
       user_id: dep.user_id,
       type: 'deposit',
       amount: usdAmountRounded,
-      description: `Deposit approved: ${dep.method} (${label}) → $${usdAmountRounded.toFixed(4)} USD`,
+      description: `Deposit approved: ${dep.method} (${depositDisplay(dep).label})`,
       ref_id: dep.deposit_ref || 'DEP-' + dep.id,
     });
 
-    // Mark deposit approved
-    await supabase.from('deposits').update({ status: 'approved' }).eq('id', dep.id);
+    // Mark deposit as approved
+    await supabase
+      .from('deposits')
+      .update({ status: 'approved' })
+      .eq('id', dep.id);
 
-    // ── REFERRAL BONUS — only on first approved deposit ──────────────────────
+    // Referral bonus — only on first approved deposit
     const referredByCode = u.referred_by || dep.users?.referred_by;
     if (referredByCode && !dep.referral_bonus_paid) {
       const { data: prevDeposits } = await supabase
-        .from('deposits').select('id')
-        .eq('user_id', dep.user_id).eq('status', 'approved').neq('id', dep.id);
+        .from('deposits')
+        .select('id')
+        .eq('user_id', dep.user_id)
+        .eq('status', 'approved')
+        .neq('id', dep.id);
 
       const isFirst = !prevDeposits || prevDeposits.length === 0;
 
       if (isFirst) {
         const { data: settingsRows } = await supabase
-          .from('settings').select('key, value')
+          .from('settings')
+          .select('key, value')
           .in('key', ['referral_inviter_percent', 'referral_joiner_percent']);
 
-        let invPct = 10, joinPct = 5;
+        let invPct = 10;
+        let joinPct = 5;
         if (settingsRows) {
           settingsRows.forEach(r => {
             if (r.key === 'referral_inviter_percent') invPct = parseFloat(r.value) || 10;
-            if (r.key === 'referral_joiner_percent') joinPct = parseFloat(r.value) || 5;
+            if (r.key === 'referral_joiner_percent')  joinPct = parseFloat(r.value) || 5;
           });
         }
 
-        const invBonus = parseFloat(((usdAmountRounded * invPct) / 100).toFixed(4));
-        const joinBonus = parseFloat(((usdAmountRounded * joinPct) / 100).toFixed(4));
+        const invBonus  = (usdAmountRounded * invPct)  / 100;
+        const joinBonus = (usdAmountRounded * joinPct) / 100;
 
         const { data: inviter } = await supabase
-          .from('users').select('id, balance')
-          .eq('referral_code', referredByCode).single();
+          .from('users')
+          .select('id, balance')
+          .eq('referral_code', referredByCode)
+          .single();
 
         if (inviter) {
-          const inviterNewBal = parseFloat((parseFloat(inviter.balance || 0) + invBonus).toFixed(4));
           await supabase.from('users')
-            .update({ balance: inviterNewBal }).eq('id', inviter.id);
+            .update({ balance: parseFloat(inviter.balance || 0) + invBonus })
+            .eq('id', inviter.id);
+
           await supabase.from('transactions').insert({
-            user_id: inviter.id, type: 'referral', amount: invBonus,
+            user_id: inviter.id,
+            type: 'referral',
+            amount: invBonus,
             description: `Referral bonus ${invPct}% of $${usdAmountRounded.toFixed(2)} deposit`,
             ref_id: 'REF-INV-' + dep.id,
           });
 
           if (joinBonus > 0) {
-            const joinerNewBal = parseFloat((newBalance + joinBonus).toFixed(4));
             await supabase.from('users')
-              .update({ balance: joinerNewBal }).eq('id', dep.user_id);
+              .update({ balance: newBalance + joinBonus })
+              .eq('id', dep.user_id);
+
             await supabase.from('transactions').insert({
-              user_id: dep.user_id, type: 'referral', amount: joinBonus,
+              user_id: dep.user_id,
+              type: 'referral',
+              amount: joinBonus,
               description: `Referral welcome bonus ${joinPct}% of first deposit`,
               ref_id: 'REF-JOIN-' + dep.id,
             });
           }
-          await supabase.from('deposits').update({ referral_bonus_paid: true }).eq('id', dep.id);
+
+          await supabase.from('deposits')
+            .update({ referral_bonus_paid: true })
+            .eq('id', dep.id);
         }
       }
     }
@@ -171,40 +212,34 @@ export default function AdminDeposits() {
     setActing(false);
     setSelected(null);
     loadDeposits();
-    showMsg(`✅ Approved! ${label} → $${usdAmountRounded.toFixed(4)} USD credited to ${dep.user_name || 'user'}.`, 'ok');
+    const { label } = depositDisplay(dep);
+    showMsg(`✅ Approved! ${label} → $${usdAmountRounded.toFixed(2)} USD credited.`, 'ok');
   };
 
   const reject = async (dep) => {
     if (!rejectNote.trim()) {
-      showMsg('❌ Enter a rejection reason first.', 'err'); return;
+      showMsg('❌ Enter a rejection reason first.', 'err');
+      return;
     }
     setActing(true);
     await supabase.from('deposits').update({
-      status: 'rejected', reject_reason: rejectNote.trim(),
+      status: 'rejected',
+      reject_reason: rejectNote.trim(),
     }).eq('id', dep.id);
-    setActing(false); setSelected(null); setRejectNote('');
+    setActing(false);
+    setSelected(null);
+    setRejectNote('');
     loadDeposits();
-    showMsg('Deposit rejected. User notified.', 'ok');
+    showMsg('Deposit rejected.', 'ok');
   };
 
   const filtered = deposits.filter(d => filter === 'all' || d.status === filter);
   const pending  = deposits.filter(d => d.status === 'pending').length;
   const approved = deposits.filter(d => d.status === 'approved').length;
   const rejected = deposits.filter(d => d.status === 'rejected').length;
-
-  // BUG FIX: Total approved was shown as "$X" implying USD, but deposits are
-  // stored in PKR. Now we group by currency and show both.
-  const pkrApproved = deposits
-    .filter(d => d.status === 'approved' && !d.method?.toLowerCase().includes('binance'))
+  const totalApproved = deposits
+    .filter(d => d.status === 'approved')
     .reduce((a, b) => a + parseFloat(b.amount || 0), 0);
-  const usdtApproved = deposits
-    .filter(d => d.status === 'approved' && d.method?.toLowerCase().includes('binance'))
-    .reduce((a, b) => a + parseFloat(b.amount || 0), 0);
-
-  const totalLabel = [
-    pkrApproved > 0 ? `₨${pkrApproved.toLocaleString('en-PK')}` : null,
-    usdtApproved > 0 ? `$${usdtApproved.toFixed(2)}` : null,
-  ].filter(Boolean).join(' + ') || '₨0';
 
   return (
     <div>
@@ -214,21 +249,21 @@ export default function AdminDeposits() {
           border: `1px solid ${msgType === 'ok' ? 'rgba(0,255,136,.2)' : 'rgba(255,51,85,.2)'}`,
           borderRadius: '8px', padding: '12px', textAlign: 'center',
           color: msgType === 'ok' ? 'var(--green)' : 'var(--danger)',
-          fontWeight: 700, marginBottom: '16px', fontSize: '13px'
+          fontWeight: 700, marginBottom: '16px', fontSize: '13px',
         }}>{msg}</div>
       )}
 
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '⏳', lb: 'Pending',        vl: pending,     cl: 'cw' },
-          { ic: '✅', lb: 'Approved',       vl: approved,    cl: 'cg' },
-          { ic: '❌', lb: 'Rejected',       vl: rejected,    cl: 'cd' },
-          { ic: '💰', lb: 'Total Approved', vl: totalLabel,  cl: 'cgo' },
+          { ic: '⏳', lb: 'Pending',        vl: pending,                              cl: 'cw'  },
+          { ic: '✅', lb: 'Approved',       vl: approved,                             cl: 'cg'  },
+          { ic: '❌', lb: 'Rejected',       vl: rejected,                             cl: 'cd'  },
+          { ic: '💰', lb: 'Total Approved', vl: `₨${totalApproved.toLocaleString()}`, cl: 'cgo' },
         ].map((s, i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
             <div className="sc-lb">{s.lb}</div>
-            <div className={`sc-vl ${s.cl}`} style={{ fontSize: 'clamp(11px,1.8vw,17px)' }}>{s.vl}</div>
+            <div className={`sc-vl ${s.cl}`} style={{ fontSize: 'clamp(13px,2vw,19px)' }}>{s.vl}</div>
           </div>
         ))}
       </div>
@@ -243,7 +278,7 @@ export default function AdminDeposits() {
             color: filter === s ? '#000' : 'var(--text3)',
             border: filter === s ? 'none' : '1px solid var(--br)',
           }}>
-            {s} {s === 'pending' && pending > 0 ? `(${pending})` : ''}
+            {s}{s === 'pending' && pending > 0 ? ` (${pending})` : ''}
           </button>
         ))}
       </div>
@@ -259,11 +294,6 @@ export default function AdminDeposits() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {filtered.map(d => {
             const { label, color } = depositDisplay(d);
-            // Calculate approximate USD value for admin context
-            const rawAmt = parseFloat(d.amount || 0);
-            const isBinance = (d.method || '').toLowerCase().includes('binance');
-            const approxUsd = isBinance ? rawAmt : rawAmt / (pkrRate || 278);
-
             return (
               <div key={d.id} className="card" style={{ padding: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
@@ -299,16 +329,9 @@ export default function AdminDeposits() {
                     )}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    {/* FIXED: show PKR or USDT — the actual currency the user paid in */}
-                    <div style={{ fontFamily: 'var(--fm)', fontSize: '20px', fontWeight: 700, color, marginBottom: '2px' }}>
+                    <div style={{ fontFamily: 'var(--fm)', fontSize: '20px', fontWeight: 700, color, marginBottom: '8px' }}>
                       {label}
                     </div>
-                    {/* Show approx USD so admin knows how much to credit */}
-                    {!isBinance && (
-                      <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '8px' }}>
-                        ≈ ${approxUsd.toFixed(2)} USD
-                      </div>
-                    )}
                     {d.status === 'pending' && (
                       <button className="btn bp bsm" onClick={() => { setSelected(d); setRejectNote(''); }}>
                         Review →
@@ -325,9 +348,6 @@ export default function AdminDeposits() {
       {/* Review Modal */}
       {selected && (() => {
         const { label, color } = depositDisplay(selected);
-        const rawAmt = parseFloat(selected.amount || 0);
-        const isBinance = (selected.method || '').toLowerCase().includes('binance');
-        const approxUsd = isBinance ? rawAmt : rawAmt / (pkrRate || 278);
         return (
           <div className="mlay" onClick={e => e.target.classList.contains('mlay') && setSelected(null)}>
             <div className="mbox">
@@ -352,21 +372,12 @@ export default function AdminDeposits() {
                   </div>
                 )}
 
-                {/* FIXED: clearly shows user paid in PKR / USDT, and what USD will be credited */}
                 <div style={{ marginTop: '12px', padding: '10px', borderRadius: '7px', background: `${color}10`, border: `1px solid ${color}30`, textAlign: 'center' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '3px' }}>User Paid (Original Currency)</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '3px' }}>Amount Received</div>
                   <div style={{ fontFamily: 'var(--fm)', fontSize: '26px', color, fontWeight: 700 }}>{label}</div>
-                  {!isBinance && (
-                    <div style={{ marginTop: '6px', padding: '6px 10px', borderRadius: '6px', background: 'rgba(0,212,255,.08)', border: '1px solid rgba(0,212,255,.15)' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '2px' }}>Will credit to user balance (USD)</div>
-                      <div style={{ fontFamily: 'var(--fm)', fontSize: '16px', color: 'var(--neon)', fontWeight: 700 }}>
-                        ${approxUsd.toFixed(4)} USD
-                      </div>
-                      <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '2px' }}>
-                        Rate: 1 USD = ₨{(pkrRate || 278).toLocaleString()} PKR
-                      </div>
-                    </div>
-                  )}
+                  <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '4px' }}>
+                    Will be converted to USD and credited to balance
+                  </div>
                 </div>
               </div>
 
@@ -392,7 +403,12 @@ export default function AdminDeposits() {
 
               <div className="fi">
                 <label className="fl">Rejection Reason (required to reject)</label>
-                <input className="inp" placeholder="e.g. Wrong transaction ID" value={rejectNote} onChange={e => setRejectNote(e.target.value)} />
+                <input
+                  className="inp"
+                  placeholder="e.g. Wrong transaction ID"
+                  value={rejectNote}
+                  onChange={e => setRejectNote(e.target.value)}
+                />
               </div>
             </div>
           </div>
