@@ -5,6 +5,7 @@ import AdminCreateReseller from './AdminCreateReseller';
 export default function AdminResellers() {
   const [resellers, setResellers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [services, setServices] = useState([]);
@@ -12,21 +13,20 @@ export default function AdminResellers() {
   const [msg, setMsg] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
-  // ✅ FIX: loadResellers is wrapped in useCallback so it's stable across renders
   const loadResellers = useCallback(async () => {
     setLoading(true);
-    // ✅ FIX: Explicitly fetch all users with role='reseller' from the users table.
-    // This is the correct way to count resellers — the old code was the same,
-    // but now we also subscribe to realtime changes so newly created resellers
-    // appear immediately without refreshing the page.
+    setLoadError('');
     const { data, error } = await supabase
       .from('users')
       .select('id, full_name, email, role, balance, is_active, referral_code, created_at')
       .eq('role', 'reseller')
       .order('created_at', { ascending: false });
 
+    // FIX #28: removed console.error — show error in UI instead
     if (error) {
-      console.error('Error loading resellers:', error);
+      setLoadError('❌ Failed to load resellers. Please refresh.');
+      setLoading(false);
+      return;
     }
     if (data) setResellers(data);
     setLoading(false);
@@ -35,31 +35,25 @@ export default function AdminResellers() {
   useEffect(() => {
     loadResellers();
 
-    // ✅ FIX: Real-time subscription so when a new reseller is created,
-    // the list updates automatically without the admin needing to refresh.
     const channel = supabase
       .channel('admin-resellers-live')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'users' },
         (payload) => {
-          // Only react to users with role='reseller'
           if (payload.eventType === 'INSERT' && payload.new.role === 'reseller') {
             setResellers(prev => [payload.new, ...prev]);
           } else if (payload.eventType === 'UPDATE') {
             if (payload.new.role === 'reseller') {
-              // Updated and still reseller — update in list
               setResellers(prev => {
                 const exists = prev.some(r => r.id === payload.new.id);
                 if (exists) {
                   return prev.map(r => r.id === payload.new.id ? payload.new : r);
                 } else {
-                  // Was a buyer, now promoted to reseller
                   return [payload.new, ...prev];
                 }
               });
             } else {
-              // Was a reseller, now demoted — remove from list
               setResellers(prev => prev.filter(r => r.id !== payload.new.id));
             }
           } else if (payload.eventType === 'DELETE') {
@@ -75,7 +69,8 @@ export default function AdminResellers() {
   }, [loadResellers]);
 
   const openReseller = async (r) => {
-    setSelected(r); setMsg('');
+    setSelected(r);
+    setMsg('');
     const { data } = await supabase.from('services').select('*').eq('vendor_id', r.id);
     if (data) setServices(data);
   };
@@ -115,13 +110,20 @@ export default function AdminResellers() {
 
   const adjustBalance = async (amount) => {
     setActing(true);
-    const { data: u } = await supabase.from('users').select('balance').eq('id', selected.id).single();
+    const { data: u } = await supabase
+      .from('users')
+      .select('balance')
+      .eq('id', selected.id)
+      .single();
     if (u) {
       const newBal = parseFloat(u.balance || 0) + amount;
       await supabase.from('users').update({ balance: newBal }).eq('id', selected.id);
       await supabase.from('transactions').insert({
-        user_id: selected.id, type: 'deposit', amount,
-        description: `Admin adjustment: +$${amount}`, ref_id: 'ADJ-' + Date.now(),
+        user_id:     selected.id,
+        type:        'deposit',
+        amount:      amount,
+        description: `Admin adjustment: +$${amount}`,
+        ref_id:      'ADJ-' + Date.now(),
       });
       setSelected(p => ({ ...p, balance: newBal }));
     }
@@ -143,7 +145,10 @@ export default function AdminResellers() {
   const filtered = resellers.filter(r => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return r.full_name?.toLowerCase().includes(q) || r.email?.toLowerCase().includes(q);
+    return (
+      r.full_name?.toLowerCase().includes(q) ||
+      r.email?.toLowerCase().includes(q)
+    );
   });
 
   return (
@@ -153,21 +158,33 @@ export default function AdminResellers() {
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
-            // ✅ FIX: After creating a reseller, we refresh the list.
-            // Realtime will also catch it, but this ensures it shows immediately.
             loadResellers();
           }}
         />
       )}
 
-      {/* ✅ FIX: Stats now correctly show reseller counts.
-          These pull from the `resellers` state which is filtered by role='reseller' */}
+      {/* FIX #28: load error shown in UI, not console */}
+      {loadError && (
+        <div style={{
+          background: 'rgba(255,51,85,.08)', border: '1px solid rgba(255,51,85,.2)',
+          borderRadius: '8px', padding: '12px', textAlign: 'center',
+          color: 'var(--danger)', fontWeight: 700, marginBottom: '16px', fontSize: '13px',
+        }}>
+          {loadError}
+          <button onClick={loadResellers} style={{
+            marginLeft: '12px', background: 'none', border: '1px solid var(--danger)',
+            borderRadius: '6px', padding: '3px 10px', color: 'var(--danger)',
+            cursor: 'pointer', fontSize: '11px',
+          }}>🔄 Retry</button>
+        </div>
+      )}
+
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '🏪', lb: 'Total Resellers', vl: resellers.length,                                               cl: 'cgo' },
-          { ic: '✅', lb: 'Active',           vl: resellers.filter(r => r.is_active !== false).length,           cl: 'cg'  },
-          { ic: '⏸',  lb: 'Suspended',        vl: resellers.filter(r => r.is_active === false).length,           cl: 'cd'  },
-          { ic: '💰', lb: 'Total Balance',    vl: '$' + resellers.reduce((a,b) => a + parseFloat(b.balance||0), 0).toFixed(2), cl: 'cn' },
+          { ic: '🏪', lb: 'Total Resellers', vl: resellers.length,                                                              cl: 'cgo' },
+          { ic: '✅', lb: 'Active',           vl: resellers.filter(r => r.is_active !== false).length,                          cl: 'cg'  },
+          { ic: '⏸',  lb: 'Suspended',        vl: resellers.filter(r => r.is_active === false).length,                          cl: 'cd'  },
+          { ic: '💰', lb: 'Total Balance',    vl: '$' + resellers.reduce((a, b) => a + parseFloat(b.balance || 0), 0).toFixed(2), cl: 'cn'  },
         ].map((s, i) => (
           <div key={i} className="sc">
             <span className="sc-ic">{s.ic}</span>
@@ -177,25 +194,27 @@ export default function AdminResellers() {
         ))}
       </div>
 
-      {/* Live indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
         <span style={{
           width: '7px', height: '7px', borderRadius: '50%',
           background: 'var(--green)', display: 'inline-block',
-          boxShadow: '0 0 6px var(--green)', animation: 'pulse 2s infinite'
+          boxShadow: '0 0 6px var(--green)', animation: 'pulse 2s infinite',
         }} />
         <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Live — updates when resellers are added or changed</span>
         <button
           onClick={loadResellers}
-          style={{ marginLeft: 'auto', background: 'none', border: '1px solid var(--br)', borderRadius: '6px', padding: '3px 10px', fontSize: '11px', color: 'var(--text3)', cursor: 'pointer' }}>
-          🔄 Refresh
-        </button>
+          style={{ marginLeft: 'auto', background: 'none', border: '1px solid var(--br)', borderRadius: '6px', padding: '3px 10px', fontSize: '11px', color: 'var(--text3)', cursor: 'pointer' }}
+        >🔄 Refresh</button>
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <input className="srch-inp" style={{ flex: 1 }}
+        <input
+          className="srch-inp"
+          style={{ flex: 1 }}
           placeholder="🔍 Search resellers..."
-          value={search} onChange={e => setSearch(e.target.value)} />
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
         <button className="btn bgd bmd" onClick={() => setShowCreate(true)}>
           ➕ Create Reseller
         </button>
@@ -222,16 +241,29 @@ export default function AdminResellers() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {filtered.map(r => (
-            <div key={r.id} className="card" style={{ padding: '14px', borderColor: r.is_active === false ? 'rgba(255,51,85,.2)' : 'var(--br)' }}>
+            <div
+              key={r.id}
+              className="card"
+              style={{ padding: '14px', borderColor: r.is_active === false ? 'rgba(255,51,85,.2)' : 'var(--br)' }}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0, background: 'linear-gradient(135deg,var(--gold),var(--warn))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '16px', color: '#000' }}>
+                  <div style={{
+                    width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0,
+                    background: 'linear-gradient(135deg,var(--gold),var(--warn))',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 800, fontSize: '16px', color: '#000',
+                  }}>
                     {r.full_name?.[0]?.toUpperCase() || 'R'}
                   </div>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '2px' }}>
                       {r.full_name}
-                      {r.is_active === false && <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--danger)', padding: '1px 6px', background: 'rgba(255,51,85,.12)', borderRadius: '8px', border: '1px solid rgba(255,51,85,.3)' }}>SUSPENDED</span>}
+                      {r.is_active === false && (
+                        <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--danger)', padding: '1px 6px', background: 'rgba(255,51,85,.12)', borderRadius: '8px', border: '1px solid rgba(255,51,85,.3)' }}>
+                          SUSPENDED
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '5px' }}>{r.email}</div>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -253,11 +285,19 @@ export default function AdminResellers() {
           <div className="mbox">
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
               <div className="mttl">Manage Reseller</div>
-              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button
+                onClick={() => setSelected(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}
+              >✕</button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: '8px', background: 'var(--gl)', border: '1px solid var(--br)', marginBottom: '14px' }}>
-              <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'linear-gradient(135deg,var(--gold),var(--warn))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '15px', color: '#000', flexShrink: 0 }}>
+              <div style={{
+                width: '38px', height: '38px', borderRadius: '50%',
+                background: 'linear-gradient(135deg,var(--gold),var(--warn))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 800, fontSize: '15px', color: '#000', flexShrink: 0,
+              }}>
                 {selected.full_name?.[0]?.toUpperCase()}
               </div>
               <div style={{ flex: 1 }}>
@@ -278,13 +318,17 @@ export default function AdminResellers() {
             <div className="st" style={{ fontSize: '9px' }}>Quick Balance Adjust</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '7px', marginBottom: '16px' }}>
               {[5, 10, 25, 50].map(amt => (
-                <button key={amt} className="btn bs bsm" onClick={() => adjustBalance(amt)} disabled={acting}>+${amt}</button>
+                <button key={amt} className="btn bs bsm" onClick={() => adjustBalance(amt)} disabled={acting}>
+                  +${amt}
+                </button>
               ))}
             </div>
 
             <div className="st" style={{ fontSize: '9px' }}>Their Services ({services.length})</div>
             {services.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text3)', fontSize: '12px', marginBottom: '14px' }}>No services yet</div>
+              <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text3)', fontSize: '12px', marginBottom: '14px' }}>
+                No services yet
+              </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: '14px', maxHeight: '180px', overflowY: 'auto' }}>
                 {services.map(s => (
@@ -297,7 +341,9 @@ export default function AdminResellers() {
                       <button className="btn bgh" style={{ padding: '4px 8px', fontSize: '9px' }} onClick={() => toggleService(s)}>
                         {s.is_active ? '⏸' : '▶'}
                       </button>
-                      <button className="btn bd" style={{ padding: '4px 8px', fontSize: '9px' }} onClick={() => deleteService(s.id)}>🗑</button>
+                      <button className="btn bd" style={{ padding: '4px 8px', fontSize: '9px' }} onClick={() => deleteService(s.id)}>
+                        🗑
+                      </button>
                     </div>
                   </div>
                 ))}
