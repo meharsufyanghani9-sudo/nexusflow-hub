@@ -1,2 +1,45 @@
-node_modules
+# Environment Variables (NEVER commit these)
 .env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.*.local
+
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Build Output
+/build
+/dist
+/out
+
+# Testing
+/coverage
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Vercel
+.vercel
