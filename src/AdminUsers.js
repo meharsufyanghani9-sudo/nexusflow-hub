@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 
 export default function AdminUsers() {
@@ -15,18 +15,23 @@ export default function AdminUsers() {
   const [msg, setMsg] = useState('');
   const [tab, setTab] = useState('edit');
   const [filterRole, setFilterRole] = useState('all');
-  const [usernameStatus, setUsernameStatus] = useState(''); // 'checking' | 'available' | 'taken' | ''
+  const [usernameStatus, setUsernameStatus] = useState('');
+  const [loadError, setLoadError] = useState('');
 
-  // ── FIX: Now fetches 'username' column from the database ──────────────────
+  // FIX #19: useRef for debounce — prevents memory leak and stale closure on unmount
+  const usernameTimerRef = useRef(null);
+
   const loadUsers = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     const { data, error } = await supabase
       .from('users')
       .select('id, full_name, email, role, balance, is_active, referral_code, username, created_at, referred_by')
       .order('created_at', { ascending: false });
 
+    // FIX #28: removed console.error — show error in UI instead
     if (error) {
-      console.error('Error loading users:', error);
+      setLoadError('❌ Failed to load users. Please refresh the page.');
       setLoading(false);
       return;
     }
@@ -56,8 +61,10 @@ export default function AdminUsers() {
       )
       .subscribe();
 
+    // FIX #19: clean up both the channel and any pending username timer on unmount
     return () => {
       supabase.removeChannel(channel);
+      if (usernameTimerRef.current) clearTimeout(usernameTimerRef.current);
     };
   }, [loadUsers]);
 
@@ -70,40 +77,62 @@ export default function AdminUsers() {
     setMsg('');
     setTab('edit');
     setUsernameStatus('');
+    // Clear any pending username check when opening a new user
+    if (usernameTimerRef.current) clearTimeout(usernameTimerRef.current);
   };
 
-  // ── FIX: Check username availability when admin edits a username ──────────
+  // FIX #19: debounce uses useRef so the timer survives re-renders and is
+  // properly cancelled on unmount — no more stale setState on unmounted component
   const handleUsernameChange = (val) => {
     const clean = val.toLowerCase().replace(/[^a-z0-9_]/g, '');
     setEditUsername(clean);
-    if (!clean || clean.length < 3) { setUsernameStatus(''); return; }
-    if (clean === selected?.username) { setUsernameStatus('same'); return; }
+
+    // Cancel any previous pending check immediately
+    if (usernameTimerRef.current) clearTimeout(usernameTimerRef.current);
+
+    if (!clean || clean.length < 3) {
+      setUsernameStatus('');
+      return;
+    }
+    if (clean === selected?.username) {
+      setUsernameStatus('same');
+      return;
+    }
+
     setUsernameStatus('checking');
-    setTimeout(async () => {
+
+    usernameTimerRef.current = setTimeout(async () => {
       const { data } = await supabase
         .from('users')
         .select('id')
         .eq('username', clean)
-        .single();
+        .maybeSingle();
+      // maybeSingle returns null (not error) when no row found — safe to check data
       setUsernameStatus(data ? 'taken' : 'available');
     }, 500);
   };
 
   const saveUser = async () => {
-    if (usernameStatus === 'taken') { setMsg('❌ That username is already taken'); return; }
-    if (usernameStatus === 'checking') { setMsg('⏳ Wait, checking username...'); return; }
+    if (usernameStatus === 'taken')    { setMsg('❌ That username is already taken'); return; }
+    if (usernameStatus === 'checking') { setMsg('⏳ Wait, checking username availability...'); return; }
     if (editUsername && editUsername.length < 3) { setMsg('❌ Username must be at least 3 characters'); return; }
 
-    setSaving(true); setMsg('');
+    setSaving(true);
+    setMsg('');
+
     const { error } = await supabase.from('users').update({
-      balance: parseFloat(editBal) || 0,
-      role: editRole,
+      balance:   parseFloat(editBal) || 0,
+      role:      editRole,
       full_name: editName,
-      // ── FIX: Also saves username when admin edits it ──
-      username: editUsername.toLowerCase() || null,
+      username:  editUsername.toLowerCase() || null,
     }).eq('id', selected.id);
+
     setSaving(false);
-    if (error) { setMsg('❌ Error: ' + error.message); return; }
+
+    if (error) {
+      setMsg('❌ Error: ' + error.message);
+      return;
+    }
     setMsg('✅ User updated!');
     loadUsers();
     setTimeout(() => setMsg(''), 3000);
@@ -115,11 +144,11 @@ export default function AdminUsers() {
     const newBal = currentBal + amount;
     await supabase.from('users').update({ balance: newBal }).eq('id', selected.id);
     await supabase.from('transactions').insert({
-      user_id: selected.id,
-      type: 'deposit',
-      amount: amount,
+      user_id:     selected.id,
+      type:        'deposit',
+      amount:      amount,
       description: `Admin added $${amount}`,
-      ref_id: 'ADJ-' + Date.now(),
+      ref_id:      'ADJ-' + Date.now(),
     });
     setEditBal(newBal.toString());
     setSaving(false);
@@ -137,17 +166,20 @@ export default function AdminUsers() {
   };
 
   const sendPasswordReset = async () => {
-    setPwChanging(true); setMsg('');
+    setPwChanging(true);
+    setMsg('');
     const { error } = await supabase.auth.resetPasswordForEmail(selected.email, {
-      redirectTo: window.location.origin
+      redirectTo: window.location.origin,
     });
     setPwChanging(false);
-    if (error) { setMsg('❌ Failed: ' + error.message); return; }
+    if (error) {
+      setMsg('❌ Failed: ' + error.message);
+      return;
+    }
     setMsg('✅ Password reset email sent to ' + selected.email);
     setTimeout(() => setMsg(''), 6000);
   };
 
-  // ── FIX: Search now also checks username ──────────────────────────────────
   const filtered = users.filter(u => {
     const matchesRole = filterRole === 'all' || u.role === filterRole;
     if (!matchesRole) return false;
@@ -167,27 +199,46 @@ export default function AdminUsers() {
   const totalResellers = users.filter(u => u.role === 'reseller').length;
   const totalAdmins    = users.filter(u => u.role === 'admin').length;
 
-  // Username indicator badge for the edit modal
   const UsernameIndicator = () => {
-    if (usernameStatus === 'checking') return <span style={{ fontSize: '11px', color: 'var(--text3)' }}>⏳ Checking...</span>;
+    if (usernameStatus === 'checking')  return <span style={{ fontSize: '11px', color: 'var(--text3)' }}>⏳ Checking...</span>;
     if (usernameStatus === 'available') return <span style={{ fontSize: '11px', color: 'var(--green)' }}>✅ Available</span>;
-    if (usernameStatus === 'taken') return <span style={{ fontSize: '11px', color: 'var(--danger)' }}>❌ Taken</span>;
-    if (usernameStatus === 'same') return <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Current</span>;
+    if (usernameStatus === 'taken')     return <span style={{ fontSize: '11px', color: 'var(--danger)' }}>❌ Taken</span>;
+    if (usernameStatus === 'same')      return <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Current</span>;
     return null;
   };
 
   return (
     <div>
+      {/* FIX #28: load error shown in UI, not console */}
+      {loadError && (
+        <div style={{
+          background: 'rgba(255,51,85,.08)', border: '1px solid rgba(255,51,85,.2)',
+          borderRadius: '8px', padding: '12px', textAlign: 'center',
+          color: 'var(--danger)', fontWeight: 700, marginBottom: '16px', fontSize: '13px',
+        }}>
+          {loadError}
+          <button onClick={loadUsers} style={{
+            marginLeft: '12px', background: 'none', border: '1px solid var(--danger)',
+            borderRadius: '6px', padding: '3px 10px', color: 'var(--danger)',
+            cursor: 'pointer', fontSize: '11px',
+          }}>🔄 Retry</button>
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="cgrid" style={{ marginBottom: '16px' }}>
         {[
-          { ic: '👥', lb: 'Total Users',  vl: totalUsers,     cl: 'cn',  role: 'all' },
-          { ic: '🛒', lb: 'Buyers',       vl: totalBuyers,    cl: 'cn',  role: 'buyer' },
+          { ic: '👥', lb: 'Total Users',  vl: totalUsers,     cl: 'cn',  role: 'all'      },
+          { ic: '🛒', lb: 'Buyers',       vl: totalBuyers,    cl: 'cn',  role: 'buyer'    },
           { ic: '🏪', lb: 'Resellers',    vl: totalResellers, cl: 'cgo', role: 'reseller' },
-          { ic: '👑', lb: 'Admins',       vl: totalAdmins,    cl: 'cp',  role: 'admin' },
+          { ic: '👑', lb: 'Admins',       vl: totalAdmins,    cl: 'cp',  role: 'admin'    },
         ].map((s, i) => (
-          <div key={i} className="sc" style={{ cursor: 'pointer', outline: filterRole === s.role ? '2px solid var(--neon)' : 'none' }}
-            onClick={() => setFilterRole(filterRole === s.role ? 'all' : s.role)}>
+          <div
+            key={i}
+            className="sc"
+            style={{ cursor: 'pointer', outline: filterRole === s.role ? '2px solid var(--neon)' : 'none' }}
+            onClick={() => setFilterRole(filterRole === s.role ? 'all' : s.role)}
+          >
             <span className="sc-ic">{s.ic}</span>
             <div className="sc-lb">{s.lb}</div>
             <div className={`sc-vl ${s.cl}`}>{s.vl}</div>
@@ -200,27 +251,32 @@ export default function AdminUsers() {
         <span style={{
           width: '7px', height: '7px', borderRadius: '50%',
           background: 'var(--green)', display: 'inline-block',
-          boxShadow: '0 0 6px var(--green)', animation: 'pulse 2s infinite'
+          boxShadow: '0 0 6px var(--green)', animation: 'pulse 2s infinite',
         }} />
         <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Live — updates automatically</span>
         {filterRole !== 'all' && (
           <span style={{ fontSize: '11px', color: 'var(--neon)', marginLeft: '6px' }}>
             Showing: {filterRole}s only
-            <button onClick={() => setFilterRole('all')} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', marginLeft: '4px', fontSize: '11px' }}>✕ clear</button>
+            <button
+              onClick={() => setFilterRole('all')}
+              style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', marginLeft: '4px', fontSize: '11px' }}
+            >✕ clear</button>
           </span>
         )}
         <button
           onClick={loadUsers}
-          style={{ marginLeft: 'auto', background: 'none', border: '1px solid var(--br)', borderRadius: '6px', padding: '3px 10px', fontSize: '11px', color: 'var(--text3)', cursor: 'pointer' }}>
-          🔄 Refresh
-        </button>
+          style={{ marginLeft: 'auto', background: 'none', border: '1px solid var(--br)', borderRadius: '6px', padding: '3px 10px', fontSize: '11px', color: 'var(--text3)', cursor: 'pointer' }}
+        >🔄 Refresh</button>
       </div>
 
-      {/* ── FIX: Search now searches by username too ── */}
       <div style={{ marginBottom: '14px' }}>
-        <input className="srch-inp" style={{ width: '100%' }}
+        <input
+          className="srch-inp"
+          style={{ width: '100%' }}
           placeholder="🔍 Search by name, email, @username, referral code, user ID..."
-          value={search} onChange={e => setSearch(e.target.value)} />
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
         {(search || filterRole !== 'all') && (
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>
             Showing {filtered.length} of {users.length} user{users.length !== 1 ? 's' : ''}
@@ -233,7 +289,7 @@ export default function AdminUsers() {
           <div style={{ fontSize: '24px', marginBottom: '10px' }}>⏳</div>
           Loading users from database...
         </div>
-      ) : users.length === 0 ? (
+      ) : users.length === 0 && !loadError ? (
         <div className="empty">
           <span className="empty-ic">👥</span>
           <div className="empty-tx">No users found</div>
@@ -245,7 +301,11 @@ export default function AdminUsers() {
           <span className="empty-ic">🔍</span>
           <div className="empty-tx">No users match your search</div>
           <div className="empty-sb">Try a different name, email or @username</div>
-          <button className="btn bgh bsm" style={{ marginTop: '12px' }} onClick={() => { setSearch(''); setFilterRole('all'); }}>Clear Filters</button>
+          <button
+            className="btn bgh bsm"
+            style={{ marginTop: '12px' }}
+            onClick={() => { setSearch(''); setFilterRole('all'); }}
+          >Clear Filters</button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -257,7 +317,7 @@ export default function AdminUsers() {
                     width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0,
                     background: 'linear-gradient(135deg,var(--neon2),var(--purple))',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 800, fontSize: '16px', color: '#fff'
+                    fontWeight: 800, fontSize: '16px', color: '#fff',
                   }}>
                     {u.full_name?.[0]?.toUpperCase() || 'U'}
                   </div>
@@ -271,7 +331,6 @@ export default function AdminUsers() {
                       )}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '3px' }}>{u.email}</div>
-                    {/* ── FIX: Username is now shown in the user card ── */}
                     {u.username && (
                       <div style={{ fontSize: '11px', color: 'var(--neon)', marginBottom: '4px', fontFamily: 'var(--fm)' }}>
                         @{u.username}
@@ -301,11 +360,19 @@ export default function AdminUsers() {
           <div className="mbox">
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
               <div className="mttl">Edit User</div>
-              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button
+                onClick={() => setSelected(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}
+              >✕</button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: '8px', background: 'var(--gl)', border: '1px solid var(--br)', marginBottom: '14px' }}>
-              <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'linear-gradient(135deg,var(--neon2),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '15px', color: '#fff', flexShrink: 0 }}>
+              <div style={{
+                width: '38px', height: '38px', borderRadius: '50%',
+                background: 'linear-gradient(135deg,var(--neon2),var(--purple))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 800, fontSize: '15px', color: '#fff', flexShrink: 0,
+              }}>
                 {selected.full_name?.[0]?.toUpperCase() || 'U'}
               </div>
               <div>
@@ -322,14 +389,15 @@ export default function AdminUsers() {
                   fontSize: '11px', fontWeight: 600, border: 'none',
                   background: selected.is_active === false ? 'rgba(0,255,136,.15)' : 'rgba(255,51,85,.12)',
                   color: selected.is_active === false ? 'var(--green)' : 'var(--danger)',
-                }}>
+                }}
+              >
                 {selected.is_active === false ? '✅ Activate' : '🚫 Suspend'}
               </button>
             </div>
 
             <div className="atbs" style={{ marginBottom: '16px' }}>
-              <button className={`atb ${tab === 'edit' ? 'on' : ''}`} onClick={() => { setTab('edit'); setMsg(''); }}>Edit</button>
-              <button className={`atb ${tab === 'balance' ? 'on' : ''}`} onClick={() => { setTab('balance'); setMsg(''); }}>Balance</button>
+              <button className={`atb ${tab === 'edit'     ? 'on' : ''}`} onClick={() => { setTab('edit');     setMsg(''); }}>Edit</button>
+              <button className={`atb ${tab === 'balance'  ? 'on' : ''}`} onClick={() => { setTab('balance');  setMsg(''); }}>Balance</button>
               <button className={`atb ${tab === 'password' ? 'on' : ''}`} onClick={() => { setTab('password'); setMsg(''); }}>Password</button>
             </div>
 
@@ -340,7 +408,6 @@ export default function AdminUsers() {
                   <input className="inp" value={editName} onChange={e => setEditName(e.target.value)} />
                 </div>
 
-                {/* ── FIX: Admin can now view and edit the user's username ── */}
                 <div className="fi">
                   <label className="fl" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>Username</span>
@@ -349,7 +416,7 @@ export default function AdminUsers() {
                   <div style={{ position: 'relative' }}>
                     <span style={{
                       position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)',
-                      color: 'var(--text3)', fontSize: '14px', pointerEvents: 'none'
+                      color: 'var(--text3)', fontSize: '14px', pointerEvents: 'none',
                     }}>@</span>
                     <input
                       className="inp"
@@ -375,12 +442,22 @@ export default function AdminUsers() {
                     <option value="admin">👑 Admin</option>
                   </select>
                 </div>
+
                 <div className="fi">
                   <label className="fl">Balance ($)</label>
                   <input className="inp" type="number" value={editBal} onChange={e => setEditBal(e.target.value)} />
                 </div>
-                {msg && <div style={{ fontSize: '12px', textAlign: 'center', marginBottom: '10px', color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)' }}>{msg}</div>}
-                <button className="btn bp blg bw" onClick={saveUser} disabled={saving || usernameStatus === 'taken' || usernameStatus === 'checking'}>
+
+                {msg && (
+                  <div style={{ fontSize: '12px', textAlign: 'center', marginBottom: '10px', color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)' }}>
+                    {msg}
+                  </div>
+                )}
+                <button
+                  className="btn bp blg bw"
+                  onClick={saveUser}
+                  disabled={saving || usernameStatus === 'taken' || usernameStatus === 'checking'}
+                >
                   <span>{saving ? 'Saving...' : 'Save Changes'}</span><span>→</span>
                 </button>
               </div>
@@ -390,7 +467,9 @@ export default function AdminUsers() {
               <div>
                 <div style={{ textAlign: 'center', padding: '16px', borderRadius: '8px', background: 'rgba(0,255,136,.06)', border: '1px solid rgba(0,255,136,.15)', marginBottom: '16px' }}>
                   <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '2px' }}>Current Balance</div>
-                  <div style={{ fontFamily: 'var(--fm)', fontSize: '26px', fontWeight: 700, color: 'var(--green)' }}>${parseFloat(editBal || 0).toFixed(2)}</div>
+                  <div style={{ fontFamily: 'var(--fm)', fontSize: '26px', fontWeight: 700, color: 'var(--green)' }}>
+                    ${parseFloat(editBal || 0).toFixed(2)}
+                  </div>
                 </div>
                 <div className="fi">
                   <label className="fl">Set Exact Balance ($)</label>
@@ -406,7 +485,11 @@ export default function AdminUsers() {
                     <button key={amt} className="btn bgd bsm" onClick={() => addBalance(amt)} disabled={saving}>+${amt}</button>
                   ))}
                 </div>
-                {msg && <div style={{ fontSize: '12px', textAlign: 'center', marginBottom: '10px', color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)' }}>{msg}</div>}
+                {msg && (
+                  <div style={{ fontSize: '12px', textAlign: 'center', marginBottom: '10px', color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)' }}>
+                    {msg}
+                  </div>
+                )}
                 <button className="btn bp blg bw" onClick={saveUser} disabled={saving}>
                   <span>{saving ? 'Saving...' : 'Update Balance'}</span><span>→</span>
                 </button>
@@ -431,7 +514,7 @@ export default function AdminUsers() {
                     fontSize: '12px', textAlign: 'center', marginBottom: '12px', padding: '10px', borderRadius: '7px',
                     background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : 'rgba(255,51,85,.08)',
                     border: `1px solid ${msg.startsWith('✅') ? 'rgba(0,255,136,.2)' : 'rgba(255,51,85,.2)'}`,
-                    color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)', lineHeight: 1.6
+                    color: msg.startsWith('✅') ? 'var(--green)' : 'var(--danger)', lineHeight: 1.6,
                   }}>
                     {msg}
                   </div>
