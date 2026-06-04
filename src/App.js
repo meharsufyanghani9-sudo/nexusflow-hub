@@ -29,6 +29,7 @@ import AdminCurrencies from './AdminCurrencies';
 import AdminMassEmail from './AdminMassEmail';
 import AdminOrders from './AdminOrders';
 import AdminServices from './AdminServices';
+import AdminManageFilters from './AdminManageFilters';
 import ResellerDashboard from './ResellerDashboard';
 import ResellerServices from './ResellerServices';
 import ResellerEarnings from './ResellerEarnings';
@@ -49,6 +50,7 @@ const pageTitles = {
   support:      'Support Tickets', currencies: 'Currency Rates',
   massemail:    'Mass Email',   buyersupport:  'Support',
   adminorders:  'Manage Orders', adminservices: 'Manage Services',
+  adminfilters: 'Manage Filters',
 };
 
 const buyerNav = [
@@ -232,6 +234,7 @@ export default function App() {
       if (page === 'dashboard')    return <AdminDashboard  user={user} onNav={navigate} />;
       if (page === 'adminorders')  return <AdminOrders />;
       if (page === 'adminservices')return <AdminServices />;
+      if (page === 'adminfilters') return <AdminManageFilters />;
       if (page === 'deposits')     return <AdminDeposits />;
       if (page === 'users')        return <AdminUsers />;
       if (page === 'settings')     return <AdminSettings />;
