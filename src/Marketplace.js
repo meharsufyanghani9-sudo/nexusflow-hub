@@ -1,335 +1,238 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
-const PLATFORMS = [
-  { id: 'all',       label: 'Everything', icon: '🌐',  color: '#00d4ff' },
-  { id: 'instagram', label: 'Instagram',  icon: '📸',  color: '#E1306C' },
-  { id: 'facebook',  label: 'Facebook',   icon: '👍',  color: '#1877F2' },
-  { id: 'youtube',   label: 'YouTube',    icon: '▶️',  color: '#FF0000' },
-  { id: 'twitter',   label: 'Twitter',    icon: '🐦',  color: '#1DA1F2' },
-  { id: 'spotify',   label: 'Spotify',    icon: '🎵',  color: '#1DB954' },
-  { id: 'tiktok',    label: 'TikTok',     icon: '🎵',  color: '#00d4ff' },
-  { id: 'linkedin',  label: 'LinkedIn',   icon: '💼',  color: '#0077B5' },
-  { id: 'google',    label: 'Google',     icon: '🔍',  color: '#4285F4' },
-  { id: 'whatsapp',  label: 'WhatsApp',   icon: '💬',  color: '#25D366' },
-  { id: 'telegram',  label: 'Telegram',   icon: '✈️',  color: '#0088cc' },
-  { id: 'website',   label: 'Website',    icon: '🌐',  color: '#7b2fff' },
-  { id: 'discord',   label: 'Discord',    icon: '🎮',  color: '#5865F2' },
-  { id: 'snapchat',  label: 'Snapchat',   icon: '👻',  color: '#FFFC00' },
-  { id: 'threads',   label: 'Threads',    icon: '🧵',  color: '#aaa' },
-  { id: 'twitch',    label: 'Twitch',     icon: '🟣',  color: '#9146FF' },
-  { id: 'capcut',    label: 'CapCut',     icon: '🎬',  color: '#aaa' },
-  { id: 'custom',    label: 'Other',      icon: '⚙️',  color: '#888' },
-];
-const PLATFORM_SERVICE_TYPES = {
-  all:       ['Followers','Likes','Views','Comments','Shares','Subscribers','Saves','Members','Reactions','Traffic'],
-  tiktok:    ['Followers','Likes','Views','Comments','Shares','Saves'],
-  instagram: ['Followers','Likes','Views','Comments','Shares','Saves','Reels Views','Story Views'],
-  youtube:   ['Subscribers','Views','Likes','Comments','Watch Hours','Shares'],
-  facebook:  ['Followers','Likes','Views','Comments','Shares','Page Likes','Group Members','Reactions'],
-  twitter:   ['Followers','Likes','Retweets','Views','Comments'],
-  telegram:  ['Members','Views','Reactions','Post Views','Comments'],
-  spotify:   ['Followers','Plays','Streams','Monthly Listeners','Saves'],
-  linkedin:  ['Followers','Connections','Views','Likes','Comments'],
-  whatsapp:  ['Members','Views'],
-  snapchat:  ['Followers','Views','Story Views'],
-  discord:   ['Members','Server Boosts'],
-  threads:   ['Followers','Likes','Views','Comments','Shares'],
-  twitch:    ['Followers','Views','Live Views','Subscribers'],
-  google:    ['Reviews','Maps Reviews','Play Store Downloads'],
-  website:   ['Traffic','Visitors'],
-  capcut:    ['Followers','Views','Likes'],
-  custom:    ['Traffic','Views','Followers','Members'],
+// ─────────────────────────────────────────────────────────
+// Default icons for platforms that don't have a DB icon
+// ─────────────────────────────────────────────────────────
+const defaultPlatformColors = {
+  instagram: '#E1306C', tiktok: '#00d4ff', youtube: '#FF0000',
+  twitter: '#1DA1F2', facebook: '#1877F2', telegram: '#0088cc',
+  snapchat: '#FFFC00', linkedin: '#0077B5', custom: '#7b2fff',
+  spotify: '#1DB954', discord: '#5865F2', twitch: '#9146FF',
+  google: '#4285F4', whatsapp: '#25D366', website: '#7b2fff',
+  threads: '#000000', capcut: '#00d4ff', other: '#666666',
 };
-
-const platformMap = {};
-PLATFORMS.forEach(p => { platformMap[p.id] = p; });
-
-const PAGE_SIZE = 15;
 
 export default function Marketplace({ user, onNav }) {
   const { format } = useCurrency();
 
-  // Featured
-  const [featuredServices, setFeaturedServices] = useState([]);
-  const [featuredLoading, setFeaturedLoading]   = useState(true);
+  // ── All services (raw from DB) ──────────────────────
+  const [allServices, setAllServices] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Live / paginated
-  const [lsServices, setLsServices] = useState([]);
-  const [lsPage, setLsPage]         = useState(1);
-  const [lsLoading, setLsLoading]   = useState(false);
-  const [lsHasMore, setLsHasMore]   = useState(true);
-  const [lsTotal, setLsTotal]       = useState(0);
+  // ── Filter data from DB ─────────────────────────────
+  const [filterPlatforms, setFilterPlatforms] = useState([]);
+  const [filterServiceTypes, setFilterServiceTypes] = useState([]);
+  const [filterTypes, setFilterTypes] = useState([]);
 
-  // All services for category/service dropdowns
-  const [allForDropdown, setAllForDropdown] = useState([]);
+  // Maps: filterId -> Set<serviceId>
+  const [platformServiceMap, setPlatformServiceMap] = useState({});
+  const [serviceTypeMap, setServiceTypeMap] = useState({});
+  const [filterTypeMap, setFilterTypeMap] = useState({});
 
-  // Filters
-  const [tab, setTab]             = useState('featured');
-  const [platform, setPlatform]   = useState('all');
-  const [serviceType, setServiceType] = useState('');
-  const [search, setSearch]       = useState('');
-  const [category, setCategory]   = useState('');
-  const [serviceFilter, setServiceFilter] = useState('');
-  const [priceSort, setPriceSort] = useState('');
+  // Custom prices: serviceId -> custom_price
+  const [customPrices, setCustomPrices] = useState({});
 
-  // Order modal
-  const [selected, setSelected]     = useState(null);
-  const [link, setLink]             = useState('');
-  const [qty, setQty]               = useState('');
-  const [ordering, setOrdering]     = useState(false);
-  const [ordered, setOrdered]       = useState(false);
+  // ── Selected filters (user choices) ────────────────
+  const [selPlatform, setSelPlatform] = useState(null);   // filter_platforms row or null (= all)
+  const [selServiceType, setSelServiceType] = useState(null); // filter_service_types row or null
+  const [selFilterType, setSelFilterType] = useState(null);   // filter_types row or null
+  const [search, setSearch] = useState('');
+
+  // ── Order Modal ─────────────────────────────────────
+  const [selected, setSelected] = useState(null);
+  const [link, setLink] = useState('');
+  const [qty, setQty] = useState('');
+  const [ordering, setOrdering] = useState(false);
+  const [ordered, setOrdered] = useState(false);
   const [orderError, setOrderError] = useState('');
 
-  const sentinelRef   = useRef(null);
-  const searchTimeout = useRef(null);
+  // ─────────────────────────────────────────────────────
+  useEffect(() => { loadEverything(); }, []);
 
-  // ─── Load featured ────────────────────────────────────────
-  useEffect(() => {
-    supabase.from('services').select('*')
-      .eq('is_active', true).eq('is_featured', true)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => { if (data) setFeaturedServices(data); setFeaturedLoading(false); });
-  }, []);
-
-  // ─── Load all service names for category/service dropdowns ─
-  useEffect(() => {
-    supabase.from('services').select('id,name,category,platform')
-      .eq('is_active', true).order('name')
-      .then(({ data }) => { if (data) setAllForDropdown(data); });
-  }, []);
-
-  // ─── Derived: unique categories for selected platform ─────
-  const categories = [...new Set(
-    allForDropdown
-      .filter(s => platform === 'all' || s.platform === platform)
-      .map(s => s.category)
-      .filter(Boolean)
-  )].sort();
-
-  // ─── Derived: services for selected category ──────────────
-  const categoryServices = allForDropdown.filter(s =>
-    (platform === 'all' || s.platform === platform) &&
-    (!category || s.category === category)
-  );
-
-  // ─── Load live page ───────────────────────────────────────
-  const loadLivePage = useCallback(async (pageNum, reset = false, pf = 'all', cat = '', svcId = '', sort = '') => {
-    setLsLoading(true);
-    const from = (pageNum - 1) * PAGE_SIZE;
-    const to   = from + PAGE_SIZE - 1;
-    let query = supabase.from('services').select('*', { count: 'exact' })
-      .eq('is_active', true)
-      .range(from, to);
-    // Server-side price sort
-    if (sort === 'asc') query = query.order('price_per_1k', { ascending: true });
-    else if (sort === 'desc') query = query.order('price_per_1k', { ascending: false });
-    else query = query.order('created_at', { ascending: false });
-    if (pf && pf !== 'all') query = query.eq('platform', pf);
-    if (cat) query = query.eq('category', cat);
-    if (svcId) query = query.eq('id', svcId);
-    const { data, count } = await query;
-    if (data) {
-      setLsServices(prev => reset ? data : [...prev, ...data]);
-      setLsHasMore(data.length === PAGE_SIZE);
-      if (count !== null) setLsTotal(count);
-    }
-    setLsLoading(false);
-  }, []);
-
-  // ─── Infinite scroll ──────────────────────────────────────
-  useEffect(() => {
-    if (!sentinelRef.current) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && lsHasMore && !lsLoading && !search && !serviceFilter) {
-        const next = lsPage + 1;
-        setLsPage(next);
-        loadLivePage(next, false, platform, category, serviceFilter, priceSort);
-      }
-    }, { threshold: 0.1 });
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [lsHasMore, lsLoading, lsPage, loadLivePage, search, platform, category, serviceFilter]);
-
-  const switchToLive = (pf = platform, cat = category, svc = serviceFilter, sort = priceSort) => {
-    setTab('live');
-    setLsPage(1); setLsHasMore(true);
-    loadLivePage(1, true, pf, cat, svc, sort);
-  };
-
-  // ─── Platform click ───────────────────────────────────────
-  const handlePlatform = (p) => {
-    setPlatform(p);
-    setCategory('');
-    setServiceType('');
-    setServiceFilter('');
-    setSearch('');
-    switchToLive(p, '', '');
-  };
-
-  // ─── Service type click ──────────────────────────────────
-  const handleServiceType = (stype, sortOverride) => {
-    const activeSort = sortOverride !== undefined ? sortOverride : priceSort;
-    setServiceType(stype);
-    setCategory('');
-    setSearch(stype);
-    if (!stype) {
-      setLsPage(1); setLsHasMore(true);
-      loadLivePage(1, true, platform, '', '', activeSort);
-      return;
-    }
-    setLsLoading(true);
-    let q = supabase.from('services').select('*')
-      .eq('is_active', true)
-      .ilike('name', `%${stype}%`);
-    if (platform !== 'all') q = q.eq('platform', platform);
-    if (activeSort === 'asc') q = q.order('price_per_1k', { ascending: true });
-    else if (activeSort === 'desc') q = q.order('price_per_1k', { ascending: false });
-    else q = q.order('created_at', { ascending: false });
-    q.limit(500).then(({ data }) => {
-      setLsServices(data || []);
-      setLsHasMore(false);
-      setLsTotal((data || []).length);
-      setLsLoading(false);
-      setTab('live');
-    });
-  };
-
-  // ─── Filter chip click — keyword search in service name ──
-  const handleCategory = (cat, sortOverride) => {
-    const activeSort = sortOverride !== undefined ? sortOverride : priceSort;
-    setCategory(cat);
-    setServiceFilter('');
-    // Map chip id to search keyword
-    // Keyword map — positive match OR negative match
-    const filterMap = {
-      'guaranteed':  { include: 'guaranteed',   exclude: null },
-      'non-drop':    { include: 'non-drop',      exclude: null },
-      'budget':      { include: 'budget',        exclude: null },
-      'with-refill': { include: 'SR-LT',         exclude: 'No Refill' },
-      'no-refill':   { include: 'No Refill',     exclude: null },
-      'fast':        { include: 'fast',           exclude: null },
-      'lifetime':    { include: 'lifetime',       exclude: null },
-    };
-    const flt = filterMap[cat];
-    if (flt) {
-      setSearch(flt.include);
-      setLsLoading(true);
-      // Build query — sort by priceSort if set
-      let q = supabase.from('services').select('*')
-        .eq('is_active', true)
-        .ilike('name', `%${flt.include}%`);
-      if (activeSort === 'asc') q = q.order('price_per_1k', { ascending: true });
-      else if (activeSort === 'desc') q = q.order('price_per_1k', { ascending: false });
-      else q = q.order('name');
-      q.limit(500).then(({ data }) => {
-          let filtered = data || [];
-          // Apply platform filter
-          if (platform !== 'all') filtered = filtered.filter(s => s.platform === platform);
-          // Apply exclude filter
-          if (flt.exclude) {
-            filtered = filtered.filter(s => !s.name.toLowerCase().includes(flt.exclude.toLowerCase()));
-          }
-          setLsServices(filtered);
-          setLsHasMore(false);
-          setLsTotal(filtered.length);
-          setLsLoading(false);
-          setTab('live');
-        });
-    } else {
-      setSearch('');
-      setLsPage(1); setLsHasMore(true);
-      switchToLive(platform, '', '', priceSort);
-    }
-  };
-
-  // ─── Service dropdown change ──────────────────────────────
-  const handleServiceFilter = (svcId) => {
-    setServiceFilter(svcId);
-    setSearch('');
-    switchToLive(platform, category, svcId);
-  };
-
-  // ─── Search ───────────────────────────────────────────────
-  const handleSearch = (val) => {
-    setSearch(val);
-    clearTimeout(searchTimeout.current);
-    if (val.trim()) {
-      searchTimeout.current = setTimeout(async () => {
-        setLsLoading(true);
-        let query = supabase.from('services').select('*')
+  const loadEverything = async () => {
+    setLoading(true);
+    try {
+      // Load services
+      const BATCH = 1000;
+      let allSvc = [];
+      let from = 0;
+      for (let page = 0; page < 10; page++) {
+        const { data } = await supabase.from('services').select('*')
           .eq('is_active', true)
-          .ilike('name', `%${val.trim()}%`)
-          .order('name').limit(100);
-        if (platform !== 'all') query = query.eq('platform', platform);
-        if (category) query = query.eq('category', category);
-        const { data } = await query;
-        if (data) { setLsServices(data); setLsHasMore(false); }
-        setLsLoading(false);
-      }, 400);
-    } else {
-      setLsPage(1); setLsHasMore(true);
-      loadLivePage(1, true, platform, category, serviceFilter);
+          .order('is_featured', { ascending: false })
+          .order('created_at', { ascending: false })
+          .range(from, from + BATCH - 1);
+        if (!data || data.length === 0) break;
+        allSvc = [...allSvc, ...data];
+        if (data.length < BATCH) break;
+        from += BATCH;
+      }
+      setAllServices(allSvc);
+
+      // Load filter platforms (stage 1)
+      const { data: plats } = await supabase.from('filter_platforms')
+        .select('*').eq('is_active', true).order('sort_order').order('created_at');
+      setFilterPlatforms(plats || []);
+
+      // Load platform <-> service links
+      const { data: platSvc } = await supabase.from('filter_platform_services').select('*');
+      const pm = {};
+      (platSvc || []).forEach(r => {
+        if (!pm[r.platform_id]) pm[r.platform_id] = new Set();
+        pm[r.platform_id].add(r.service_id);
+      });
+      setPlatformServiceMap(pm);
+
+      // Load service types (stage 2)
+      const { data: svcTypes } = await supabase.from('filter_service_types')
+        .select('*').eq('is_active', true).order('sort_order').order('created_at');
+      setFilterServiceTypes(svcTypes || []);
+
+      // Load service type <-> service links
+      const { data: svcTypeSvc } = await supabase.from('filter_service_type_services').select('*');
+      const stm = {};
+      (svcTypeSvc || []).forEach(r => {
+        if (!stm[r.service_type_id]) stm[r.service_type_id] = new Set();
+        stm[r.service_type_id].add(r.service_id);
+      });
+      setServiceTypeMap(stm);
+
+      // Load filter types (stage 3)
+      const { data: ftypes } = await supabase.from('filter_types')
+        .select('*').eq('is_active', true).order('sort_order').order('created_at');
+      setFilterTypes(ftypes || []);
+
+      // Load filter type <-> service links
+      const { data: ftypeSvc } = await supabase.from('filter_type_services').select('*');
+      const ftm = {};
+      (ftypeSvc || []).forEach(r => {
+        if (!ftm[r.filter_type_id]) ftm[r.filter_type_id] = new Set();
+        ftm[r.filter_type_id].add(r.service_id);
+      });
+      setFilterTypeMap(ftm);
+
+      // Load custom prices
+      const { data: prices } = await supabase.from('service_custom_prices').select('*');
+      const cp = {};
+      (prices || []).forEach(r => { cp[r.service_id] = r.custom_price; });
+      setCustomPrices(cp);
+
+    } catch (e) {
+      console.error('Marketplace load error:', e);
     }
+    setLoading(false);
   };
 
-  // Price sort is server-side — sortedLive is just lsServices
-  const sortedLive = lsServices;
-
-  const handlePriceSort = (val) => {
-    setPriceSort(val);
-    if (serviceType) {
-      // Re-apply service type filter with new sort
-      handleServiceType(serviceType, val);
-    } else if (category) {
-      // Re-apply filter chip with new sort
-      handleCategory(category, val);
-    } else {
-      // Normal paginated load with new sort
-      setLsPage(1); setLsHasMore(true);
-      loadLivePage(1, true, platform, '', '', val);
+  // ─────────────────────────────────────────────────────
+  // Resolve effective price for a service
+  // Priority: custom_price (from manage filters) > default price_per_1k
+  // ─────────────────────────────────────────────────────
+  const effectivePrice = (service) => {
+    if (customPrices[service.id] != null) {
+      return parseFloat(customPrices[service.id]);
     }
+    return parseFloat(service.price_per_1k);
   };
 
-  // ─── Cost ─────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────
+  // FILTERING LOGIC
+  // Stage 1: Platform filter
+  //   - "Everything" (slug='everything') or no platform selected → show all
+  //   - Otherwise: show only services in that platform's linked set
+  // Stage 2: Service type filter
+  //   - "All" (slug='all') or none → show all from stage 1 result
+  //   - Otherwise: intersect with service type's linked set
+  // Stage 3: Filter type
+  //   - "All" (slug='all') or none → show all from stage 2 result
+  //   - Otherwise: intersect with filter type's linked set
+  // ─────────────────────────────────────────────────────
+  const applyFilters = () => {
+    let result = [...allServices];
+
+    // Stage 1 filter
+    if (selPlatform && selPlatform.slug !== 'everything') {
+      const allowed = platformServiceMap[selPlatform.id] || new Set();
+      result = result.filter(s => allowed.has(s.id));
+    }
+
+    // Stage 2 filter
+    if (selServiceType && selServiceType.slug !== 'all') {
+      const allowed = serviceTypeMap[selServiceType.id] || new Set();
+      result = result.filter(s => allowed.has(s.id));
+    }
+
+    // Stage 3 filter
+    if (selFilterType && selFilterType.slug !== 'all') {
+      const allowed = filterTypeMap[selFilterType.id] || new Set();
+      result = result.filter(s => allowed.has(s.id));
+    }
+
+    // Text search
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.platform || '').toLowerCase().includes(q) ||
+        (s.description || '').toLowerCase().includes(q)
+      );
+    }
+
+    return result;
+  };
+
+  const filteredServices = applyFilters();
+  const featuredServices = filteredServices.filter(s => s.is_featured);
+  const regularServices = filteredServices.filter(s => !s.is_featured);
+
+  // ─────────────────────────────────────────────────────
+  // Order placement
+  // ─────────────────────────────────────────────────────
   const cost = selected && qty
-    ? (parseFloat(qty) / 1000 * parseFloat(selected.price_per_1k)).toFixed(4)
+    ? (parseFloat(qty) / 1000 * effectivePrice(selected)).toFixed(4)
     : '0.00';
 
-  // ─── Place order ──────────────────────────────────────────
   const placeOrder = async () => {
     setOrderError('');
     if (!link) { setOrderError('Enter your link'); return; }
     const q = parseInt(qty);
     if (!q || q < selected.min_qty || q > selected.max_qty) {
-      setOrderError(`Quantity must be ${selected.min_qty} – ${selected.max_qty}`);
+      setOrderError(`Quantity must be ${selected.min_qty.toLocaleString()} – ${selected.max_qty.toLocaleString()}`);
       return;
     }
     const totalCost = parseFloat(cost);
-    if (totalCost > user.balance) { setOrderError('Insufficient balance'); return; }
+    if (totalCost > user.balance) { setOrderError('Insufficient balance. Please add funds.'); return; }
 
     setOrdering(true);
     const orderRef = 'NF-' + Date.now();
 
     const { error: orderErr } = await supabase.from('orders').insert({
-      order_ref: orderRef, user_id: user.id,
-      service_id: selected.id, service_name: selected.name,
-      platform: selected.platform, link, quantity: q, cost: totalCost,
-      status: 'pending', progress: 0,
-      has_refill: selected.has_refill || false,
+      order_ref: orderRef,
+      user_id: user.id,
+      service_id: selected.id,
+      service_name: selected.name,
+      platform: selected.platform,
+      link,
+      quantity: q,
+      cost: totalCost,
+      status: 'pending',
+      progress: 0,
     });
     if (orderErr) { setOrderError('Order failed: ' + orderErr.message); setOrdering(false); return; }
 
+    // Deduct balance and record transaction
     await supabase.from('users').update({ balance: user.balance - totalCost }).eq('id', user.id);
     await supabase.from('transactions').insert({
-      user_id: user.id, type: 'order', amount: -totalCost,
-      description: `Order: ${selected.name}`, ref_id: orderRef,
+      user_id: user.id,
+      type: 'order',
+      amount: -totalCost,
+      description: `Order: ${selected.name}`,
+      ref_id: orderRef,
     });
 
-    // Auto-send to provider
-    const providerServiceId = selected.provider_service_id || selected.provider_id;
-    if (selected.provider_api_url && selected.provider_api_key && providerServiceId) {
+    // Auto-send to provider API if configured
+    if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
       try {
         const res = await fetch('/api/proxy', {
           method: 'POST',
@@ -338,286 +241,405 @@ export default function Marketplace({ user, onNav }) {
             url: selected.provider_api_url,
             key: selected.provider_api_key,
             action: 'add',
-            service: String(providerServiceId),
-            link, quantity: String(q),
+            service: selected.provider_service_id,
+            link,
+            quantity: q,
           }),
         });
+        if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
         const providerData = await res.json();
-        if (providerData?.order) {
+        if (providerData && providerData.order) {
           await supabase.from('orders').update({
             vendor_order_id: String(providerData.order),
             status: 'in_progress',
           }).eq('order_ref', orderRef);
-        } else if (providerData?.error) {
+        } else if (providerData && providerData.error) {
           await supabase.from('orders').update({
             provider_note: `Provider error: ${providerData.error}`,
-          }).eq('order_ref', orderRef);
-        } else {
-          await supabase.from('orders').update({
-            provider_note: `Response: ${JSON.stringify(providerData).slice(0, 200)}`,
           }).eq('order_ref', orderRef);
         }
       } catch (e) {
         await supabase.from('orders').update({
-          provider_note: `Auto-placement failed: ${e.message}`,
+          provider_note: `Auto-send failed: ${e.message}`,
         }).eq('order_ref', orderRef);
       }
     }
 
     setOrdering(false);
     setOrdered(true);
-    setTimeout(() => { setSelected(null); setOrdered(false); setLink(''); setQty(''); }, 2500);
+    setTimeout(() => {
+      setSelected(null);
+      setOrdered(false);
+      setLink('');
+      setQty('');
+    }, 2500);
   };
 
-  const getPf = (id) => platformMap[id] || platformMap['custom'];
-  const ic = (id) => getPf(id).icon;
-  const cl = (id) => getPf(id).color;
+  // ─────────────────────────────────────────────────────
+  // Color helper
+  // ─────────────────────────────────────────────────────
+  const platformColor = (platform) =>
+    defaultPlatformColors[platform?.toLowerCase()] || '#7b2fff';
 
-  const ServiceCard = ({ s }) => (
-    <div className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
-      onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
-      {s.is_featured && (
-        <div style={{
-          position:'absolute', top:'-1px', right:'10px',
-          background:'linear-gradient(135deg,var(--gold2),var(--gold))',
-          color:'#000', fontSize:'8px', fontWeight:800, padding:'3px 8px',
-          borderRadius:'0 0 6px 6px', letterSpacing:'1px', fontFamily:'var(--fd)'
-        }}>⭐ FEATURED</div>
-      )}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px' }}>
-        <span style={{ fontSize:'22px' }}>{ic(s.platform)}</span>
-        <span style={{
-          fontSize:'9px', padding:'2px 7px', borderRadius:'10px', fontWeight:700,
-          background:`${cl(s.platform)}18`, color:cl(s.platform),
-          border:`1px solid ${cl(s.platform)}30`, textTransform:'uppercase', letterSpacing:'1px'
-        }}>{s.platform}</span>
-      </div>
-      <div style={{ fontWeight:700, fontSize:'13px', marginBottom:'4px', color:'var(--text)' }}>{s.name}</div>
-      <div style={{ fontSize:'11px', color:'var(--text3)', marginBottom:'12px', flex:1, lineHeight:1.5 }}>{s.description}</div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'auto' }}>
-        <div>
-          <div style={{ fontFamily:'var(--fm)', fontSize:'15px', fontWeight:700, color:'var(--gold)' }}>
-            {format(parseFloat(s.price_per_1k))}
+  // ─────────────────────────────────────────────────────
+  // Service Card
+  // ─────────────────────────────────────────────────────
+  const ServiceCard = ({ s }) => {
+    const price = effectivePrice(s);
+    const hasCustom = customPrices[s.id] != null;
+    const cl = platformColor(s.platform);
+    return (
+      <div
+        className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
+        onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
+        {s.is_featured && (
+          <div style={{
+            position: 'absolute', top: '-1px', right: '10px',
+            background: 'linear-gradient(135deg,var(--gold2),var(--gold))',
+            color: '#000', fontSize: '8px', fontWeight: 800, padding: '3px 8px',
+            borderRadius: '0 0 6px 6px', letterSpacing: '1px', fontFamily: 'var(--fd)'
+          }}>⭐ FEATURED</div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+          <span style={{ fontSize: '22px' }}>
+            {filterPlatforms.find(p => p.slug === s.platform?.toLowerCase())?.icon || '⚙️'}
+          </span>
+          <span style={{
+            fontSize: '9px', padding: '2px 7px', borderRadius: '10px', fontWeight: 700,
+            background: `${cl}18`, color: cl,
+            border: `1px solid ${cl}30`, textTransform: 'uppercase', letterSpacing: '1px'
+          }}>{s.platform}</span>
+        </div>
+        <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px', color: 'var(--text)' }}>{s.name}</div>
+        <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px', flex: 1, lineHeight: 1.5 }}>{s.description}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--fm)', fontSize: '15px', fontWeight: 700, color: 'var(--gold)' }}>
+              {format(price)}
+            </div>
+            <div style={{ fontSize: '9px', color: 'var(--text3)' }}>per 1,000</div>
+            {hasCustom && (
+              <div style={{ fontSize: '8px', color: 'var(--neon)', letterSpacing: '0.5px' }}>✦ Special Price</div>
+            )}
           </div>
-          <div style={{ fontSize:'9px', color:'var(--text3)' }}>per 1,000</div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Min: {(s.min_qty || 0).toLocaleString()}</div>
+            <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Max: {(s.max_qty || 0).toLocaleString()}</div>
+          </div>
         </div>
-        <div style={{ textAlign:'right' }}>
-          <div style={{ fontSize:'9px', color:'var(--text3)' }}>Min: {(s.min_qty||0).toLocaleString()}</div>
-          <div style={{ fontSize:'9px', color:'var(--text3)' }}>Max: {(s.max_qty||0).toLocaleString()}</div>
-        </div>
+        {s.provider_api_url && (
+          <div style={{ marginTop: '6px', fontSize: '9px', color: 'var(--green)', letterSpacing: '1px' }}>⚡ AUTO</div>
+        )}
+        <button className="btn bp bsm bw" style={{ marginTop: '12px' }}>Order Now →</button>
       </div>
-      <button className="btn bp bsm bw" style={{ marginTop:'12px' }}>Order Now →</button>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────
+  // RENDER FILTER PILLS
+  // ─────────────────────────────────────────────────────
+  const FilterPill = ({ item, isSelected, onClick, color }) => (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+        padding: '10px 6px', borderRadius: '10px', cursor: 'pointer', minWidth: '62px',
+        background: isSelected ? `${color}18` : 'rgba(0,0,0,.2)',
+        border: `1.5px solid ${isSelected ? color : 'var(--br)'}`,
+        transition: 'all .15s', userSelect: 'none', flexShrink: 0,
+      }}>
+      <span style={{ fontSize: '18px' }}>{item.icon}</span>
+      <span style={{
+        fontSize: '9px', fontWeight: isSelected ? 800 : 600,
+        color: isSelected ? color : 'var(--text3)',
+        textAlign: 'center', lineHeight: 1.2, maxWidth: '60px',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+      }}>{item.name}</span>
     </div>
   );
 
+  // ─────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────
+  const hasFiltersConfigured = filterPlatforms.length > 0;
+
+  // Decide whether to show the "Featured" tab at the top
+  const showFeaturedTab = featuredServices.length > 0 &&
+    !selPlatform && !selServiceType && !selFilterType && !search;
+
   return (
     <div>
-      {/* ─── TAB SWITCHER ─── */}
-      <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
-        <button onClick={() => setTab('featured')}
-          className={tab === 'featured' ? 'btn bp bmd' : 'btn bgh bmd'} style={{ flex:1 }}>
-          ⭐ Featured
-        </button>
-        <button onClick={() => { if (tab !== 'live') switchToLive(); else setTab('live'); }}
-          className={tab === 'live' ? 'btn bp bmd' : 'btn bgh bmd'} style={{ flex:1 }}>
-          🛒 Live Services {lsTotal > 0 ? `(${lsTotal.toLocaleString()})` : ''}
-        </button>
-      </div>
-
-      {/* ─── FEATURED TAB ─── */}
-      {tab === 'featured' && (
-        <>
-          {featuredLoading ? (
-            <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>⏳ Loading...</div>
-          ) : featuredServices.length === 0 ? (
-            <div className="empty">
-              <span className="empty-ic">⭐</span>
-              <div className="empty-tx">No featured services yet</div>
-            </div>
-          ) : (
-            <div className="mkt-grid-2col">
-              {featuredServices.map(s => <ServiceCard key={s.id} s={s} />)}
-            </div>
-          )}
-        </>
+      {/* ─── TOP TABS: Featured vs Live Services ─── */}
+      {!loading && (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <div style={{
+            flex: 1, padding: '12px', borderRadius: '10px', textAlign: 'center',
+            background: !selPlatform && !selServiceType && !selFilterType && !search
+              ? 'linear-gradient(135deg,rgba(0,100,180,.2),rgba(0,212,255,.1))'
+              : 'rgba(0,0,0,.2)',
+            border: '1.5px solid ' + (!selPlatform && !selServiceType && !selFilterType && !search
+              ? 'rgba(0,212,255,.4)' : 'var(--br)'),
+            cursor: 'pointer', transition: 'all .15s',
+            fontWeight: 700, fontSize: '11px', color: 'var(--text)',
+          }} onClick={() => { setSelPlatform(null); setSelServiceType(null); setSelFilterType(null); setSearch(''); }}>
+            ⭐ FEATURED
+          </div>
+          <div style={{
+            flex: 2, padding: '12px', borderRadius: '10px', textAlign: 'center',
+            background: (selPlatform || selServiceType || selFilterType || search)
+              ? 'linear-gradient(135deg,rgba(0,212,255,.15),rgba(123,47,255,.1))'
+              : 'rgba(0,0,0,.2)',
+            border: '1.5px solid ' + ((selPlatform || selServiceType || selFilterType || search)
+              ? 'rgba(0,212,255,.4)' : 'var(--br)'),
+            cursor: 'pointer', transition: 'all .15s',
+            fontWeight: 700, fontSize: '11px', color: 'var(--neon)',
+          }} onClick={() => setSelPlatform(filterPlatforms.find(p => p.slug !== 'everything') || null)}>
+            🛒 LIVE SERVICES ({allServices.length.toLocaleString()})
+          </div>
+        </div>
       )}
 
-      {/* ─── LIVE SERVICES TAB ─── */}
-      {tab === 'live' && (
+      {/* ─────────────────────────────────────────── */}
+      {/* STAGE 1: SELECT PLATFORM                    */}
+      {/* ─────────────────────────────────────────── */}
+      {!loading && filterPlatforms.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '8px', fontWeight: 700 }}>
+            SELECT PLATFORM
+          </div>
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+            {/* "All" pill */}
+            <FilterPill
+              item={{ icon: '🌐', name: 'Everything' }}
+              isSelected={!selPlatform || selPlatform?.slug === 'everything'}
+              color="var(--neon)"
+              onClick={() => { setSelPlatform(null); setSelServiceType(null); setSelFilterType(null); }}
+            />
+            {filterPlatforms.filter(p => p.slug !== 'everything').map(p => (
+              <FilterPill
+                key={p.id}
+                item={p}
+                isSelected={selPlatform?.id === p.id}
+                color={p.color || '#00d4ff'}
+                onClick={() => {
+                  setSelPlatform(p);
+                  setSelServiceType(null);
+                  setSelFilterType(null);
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────── */}
+      {/* STAGE 2: SELECT SERVICE TYPE                */}
+      {/* ─────────────────────────────────────────── */}
+      {!loading && filterServiceTypes.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '8px', fontWeight: 700 }}>
+            SELECT SERVICE
+          </div>
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+            {/* "All" pill */}
+            <FilterPill
+              item={{ icon: '💎', name: 'All' }}
+              isSelected={!selServiceType || selServiceType?.slug === 'all'}
+              color="#7b2fff"
+              onClick={() => { setSelServiceType(null); setSelFilterType(null); }}
+            />
+            {filterServiceTypes.filter(st => st.slug !== 'all').map(st => (
+              <FilterPill
+                key={st.id}
+                item={st}
+                isSelected={selServiceType?.id === st.id}
+                color="#7b2fff"
+                onClick={() => {
+                  setSelServiceType(st);
+                  setSelFilterType(null);
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────── */}
+      {/* STAGE 3: FILTER BY TYPE                     */}
+      {/* ─────────────────────────────────────────── */}
+      {!loading && filterTypes.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '8px', fontWeight: 700 }}>
+            FILTER BY TYPE
+          </div>
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px', flexWrap: 'wrap' }}>
+            {/* "All" pill */}
+            <div
+              onClick={() => setSelFilterType(null)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '5px',
+                padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                background: !selFilterType ? 'rgba(0,212,255,.12)' : 'rgba(0,0,0,.2)',
+                border: `1.5px solid ${!selFilterType ? 'var(--neon)' : 'var(--br)'}`,
+                fontSize: '10px', fontWeight: 700,
+                color: !selFilterType ? 'var(--neon)' : 'var(--text3)',
+                transition: 'all .15s', userSelect: 'none', flexShrink: 0,
+              }}>
+              💎 All
+            </div>
+            {filterTypes.filter(ft => ft.slug !== 'all').map(ft => (
+              <div key={ft.id}
+                onClick={() => setSelFilterType(selFilterType?.id === ft.id ? null : ft)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '5px',
+                  padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                  background: selFilterType?.id === ft.id ? 'rgba(255,215,0,.1)' : 'rgba(0,0,0,.2)',
+                  border: `1.5px solid ${selFilterType?.id === ft.id ? '#ffd700' : 'var(--br)'}`,
+                  fontSize: '10px', fontWeight: 700,
+                  color: selFilterType?.id === ft.id ? 'var(--gold)' : 'var(--text3)',
+                  transition: 'all .15s', userSelect: 'none', flexShrink: 0,
+                }}>
+                {ft.icon} {ft.name}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────── */}
+      {/* SEARCH BAR                                  */}
+      {/* ─────────────────────────────────────────── */}
+      <div style={{ marginBottom: '14px' }}>
+        <input className="srch-inp" style={{ width: '100%', boxSizing: 'border-box' }}
+          placeholder="🔍 Search services..."
+          value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
+      {/* ─────────────────────────────────────────── */}
+      {/* SERVICE GRID                                */}
+      {/* ─────────────────────────────────────────── */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>
+          <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>
+          Loading services...
+        </div>
+      ) : (
         <>
-          {/* STAGE 1: Platform grid */}
-          <div style={{ marginBottom:'16px' }}>
-            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
-              SELECT PLATFORM
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'4px' }}>
-              {PLATFORMS.map(p => (
-                <button key={p.id} onClick={() => handlePlatform(p.id)} style={{
-                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                  padding:'6px 3px', borderRadius:'8px', cursor:'pointer', transition:'.15s', gap:'3px',
-                  border: platform === p.id ? `2px solid ${p.color}` : '1px solid var(--br)',
-                  background: platform === p.id ? `${p.color}18` : 'var(--gl)',
-                }}>
-                  <span style={{ fontSize:'15px', lineHeight:1 }}>{p.icon}</span>
-                  <span style={{
-                    fontSize:'7px', fontWeight:700, color: platform === p.id ? p.color : 'var(--text3)',
-                    letterSpacing:'0.2px', textAlign:'center', lineHeight:1.2,
-                    border: `1px solid ${platform === p.id ? p.color : 'var(--br)'}`,
-                    padding:'1px 3px', borderRadius:'20px',
-                    background: platform === p.id ? `${p.color}20` : 'transparent',
-                  }}>{p.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Featured section (when no filter selected) */}
+          {showFeaturedTab && featuredServices.length > 0 && (
+            <>
+              <div className="st">⭐ Featured Services
+                <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, letterSpacing: '1px', marginLeft: '8px' }}>
+                  — Handpicked by admin
+                </span>
+              </div>
+              <div className="mkt-grid" style={{ marginBottom: '24px' }}>
+                {featuredServices.map(s => <ServiceCard key={s.id} s={s} />)}
+              </div>
+            </>
+          )}
 
-          {/* STAGE 2: Service Type - attractive icon grid */}
-          <div style={{ marginBottom:'12px' }}>
-            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
-              SELECT SERVICE
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'4px' }}>
-              {[{id:'', label:'All', icon:'✦'}, ...(PLATFORM_SERVICE_TYPES[platform]||PLATFORM_SERVICE_TYPES['all']).map(st => ({
-                id: st, label: st,
-                icon: st==='Followers'?'👥':st==='Likes'?'❤️':st==='Views'?'👁':st==='Comments'?'💬':
-                      st==='Shares'?'🔗':st==='Saves'?'🔖':st==='Subscribers'?'🔔':st==='Members'?'👥':
-                      st==='Reactions'?'😍':st==='Retweets'?'🔄':st==='Watch Hours'?'⏱':
-                      st==='Reels Views'?'🎬':st==='Story Views'?'📖':st==='Page Likes'?'👍':
-                      st==='Group Members'?'👫':st==='Post Views'?'📢':st==='Plays'?'▶️':
-                      st==='Streams'?'🎵':st==='Monthly Listeners'?'🎧':st==='Connections'?'🤝':
-                      st==='Live Views'?'🔴':st==='Reviews'?'⭐':st==='Maps Reviews'?'📍':
-                      st==='Play Store Downloads'?'📲':st==='Traffic'?'🌐':st==='Visitors'?'🚶':
-                      st==='Server Boosts'?'🚀':st==='Impressions'?'📊':'⚡'
-              }))].map(item => (
-                <button key={item.id} onClick={() => handleServiceType(item.id)} style={{
-                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                  padding:'6px 2px', borderRadius:'8px', cursor:'pointer', transition:'.15s', gap:'2px',
-                  border: serviceType === item.id ? '2px solid var(--neon)' : '1px solid var(--br)',
-                  background: serviceType === item.id ? 'rgba(0,212,255,.15)' : 'var(--gl)',
-                }}>
-                  <span style={{ fontSize:'13px', lineHeight:1 }}>{item.icon}</span>
-                  <span style={{
-                    fontSize:'7px', fontWeight:700, textAlign:'center', lineHeight:1.2,
-                    color: serviceType === item.id ? 'var(--neon)' : 'var(--text3)',
-                    border: `1px solid ${serviceType === item.id ? 'var(--neon)' : 'var(--br)'}`,
-                    padding:'1px 3px', borderRadius:'20px',
-                    background: serviceType === item.id ? 'rgba(0,212,255,.1)' : 'transparent',
-                  }}>{item.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* STAGE 4: Filter by type chips */}
-          <div style={{ marginBottom:'12px' }}>
-            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'2px', fontFamily:'var(--fd)', marginBottom:'8px' }}>
-              FILTER BY TYPE
-            </div>
-            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
-              {[
-                { id:'', label:'All', icon:'✦' },
-                { id:'guaranteed', label:'Guaranteed', icon:'✅' },
-                { id:'non-drop', label:'Non-Drop', icon:'💎' },
-                { id:'budget', label:'Budget', icon:'💰' },
-                { id:'with-refill', label:'With Refill', icon:'🔄' },
-                { id:'no-refill', label:'No Refill', icon:'🚫' },
-                { id:'fast', label:'Fast Delivery', icon:'⚡' },
-                { id:'lifetime', label:'Lifetime', icon:'♾️' },
-              ].map(f => (
-                <button key={f.id} onClick={() => handleCategory(f.id)}
-                  style={{
-                    padding:'5px 10px', borderRadius:'20px', cursor:'pointer',
-                    fontSize:'11px', fontWeight:700, whiteSpace:'nowrap',
-                    transition:'.15s',
-                    background: category === f.id ? 'var(--neon)' : 'var(--gl)',
-                    color: category === f.id ? '#000' : 'var(--text2)',
-                    border: category === f.id ? 'none' : '1px solid var(--br)',
-                  }}>
-                  {f.icon} {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Search + price sort */}
-          <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
-            <input className="srch-inp" style={{ flex:1, minWidth:'140px', fontSize:'16px' }}
-              placeholder="🔍 Search services..."
-              value={search} onChange={e => handleSearch(e.target.value)} />
-            <select className="sel" style={{ minWidth:'130px', flexShrink:0, fontSize:'14px' }}
-              value={priceSort} onChange={e => handlePriceSort(e.target.value)}>
-              <option value="">💰 Price: Default</option>
-              <option value="asc">💰 Low → High</option>
-              <option value="desc">💰 High → Low</option>
-            </select>
-          </div>
-
-          {/* Service grid */}
-          {lsLoading && lsServices.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'40px', color:'var(--text3)' }}>⏳ Loading services...</div>
-          ) : sortedLive.length === 0 && !lsLoading ? (
+          {/* Regular / filtered services */}
+          {filteredServices.length === 0 ? (
             <div className="empty">
               <span className="empty-ic">🔍</span>
-              <div className="empty-tx">No services found</div>
-              <div className="empty-sb">Try a different platform or category</div>
+              <div className="empty-tx">{allServices.length === 0 ? 'No services available' : 'No services match your filters'}</div>
+              <div className="empty-sb">
+                {allServices.length === 0
+                  ? 'Admin is adding services soon'
+                  : 'Try different filters or clear your selection'}
+              </div>
+              {(selPlatform || selServiceType || selFilterType || search) && (
+                <button className="btn bgh bsm" style={{ marginTop: '12px' }}
+                  onClick={() => { setSelPlatform(null); setSelServiceType(null); setSelFilterType(null); setSearch(''); }}>
+                  🗑️ Clear Filters
+                </button>
+              )}
             </div>
           ) : (
             <>
+              {/* Show result count when filtering */}
+              {(selPlatform || selServiceType || selFilterType || search) && (
+                <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>
+                    {filteredServices.length} service{filteredServices.length !== 1 ? 's' : ''} found
+                    {selPlatform && ` · ${selPlatform.name}`}
+                    {selServiceType && ` · ${selServiceType.name}`}
+                    {selFilterType && ` · ${selFilterType.name}`}
+                  </span>
+                  <button className="btn bgh bsm"
+                    onClick={() => { setSelPlatform(null); setSelServiceType(null); setSelFilterType(null); setSearch(''); }}>
+                    Clear ×
+                  </button>
+                </div>
+              )}
               <div className="mkt-grid">
-                {sortedLive.map(s => <ServiceCard key={s.id} s={s} />)}
-              </div>
-              <div ref={sentinelRef} style={{ height:'40px', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                {lsLoading && lsServices.length > 0 && (
-                  <div style={{ width:'20px', height:'20px', border:'2px solid var(--br)', borderTopColor:'var(--neon)', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />
-                )}
+                {filteredServices.map(s => <ServiceCard key={s.id} s={s} />)}
               </div>
             </>
           )}
         </>
       )}
 
-      {/* ─── ORDER MODAL ─── */}
+      {/* ─────────────────────────────────────────── */}
+      {/* ORDER MODAL                                 */}
+      {/* ─────────────────────────────────────────── */}
       {selected && (
         <div className="mlay" onClick={() => setSelected(null)}>
           <div className="mbox" onClick={e => e.stopPropagation()}>
-            <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'16px' }}>
-              <span style={{ fontSize:'28px' }}>{ic(selected.platform)}</span>
-              <div style={{ flex:1 }}>
-                <div style={{ fontWeight:800, fontSize:'15px', color:'var(--text)' }}>{selected.name}</div>
-                <div style={{ fontSize:'10px', color:cl(selected.platform), textTransform:'uppercase', letterSpacing:'1px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <span style={{ fontSize: '28px' }}>
+                {filterPlatforms.find(p => p.slug === selected.platform?.toLowerCase())?.icon || '⚙️'}
+              </span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text)' }}>{selected.name}</div>
+                <div style={{
+                  fontSize: '10px',
+                  color: platformColor(selected.platform),
+                  textTransform: 'uppercase', letterSpacing: '1px'
+                }}>
                   {selected.platform}
+                  {selected.provider_api_url && <span style={{ color: 'var(--green)', marginLeft: '6px' }}>⚡ Auto-delivery</span>}
+                  {customPrices[selected.id] && <span style={{ color: 'var(--neon)', marginLeft: '6px' }}>✦ Special Price</span>}
                 </div>
               </div>
               <button onClick={() => setSelected(null)}
-                style={{ background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'22px' }}>×</button>
+                style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '22px' }}>×</button>
             </div>
+
             {ordered ? (
-              <div style={{ textAlign:'center', padding:'30px 0' }}>
-                <div style={{ fontSize:'40px', marginBottom:'12px' }}>✅</div>
-                <div style={{ color:'var(--green)', fontWeight:700, fontSize:'15px', marginBottom:'6px' }}>Order Placed!</div>
-                <div style={{ color:'var(--text3)', fontSize:'12px' }}>Processing automatically...</div>
+              <div style={{ textAlign: 'center', padding: '30px 0' }}>
+                <div style={{ fontSize: '40px', marginBottom: '12px' }}>✅</div>
+                <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: '15px', marginBottom: '6px' }}>Order Placed!</div>
+                <div style={{ color: 'var(--text3)', fontSize: '12px' }}>Processing automatically...</div>
               </div>
             ) : (
               <>
                 <div className="fi">
                   <label className="fl">Your Link / Username</label>
-                  <input className="inp" value={link} onChange={e => setLink(e.target.value)}
-                    placeholder="https://..." style={{ fontSize:'16px' }} />
+                  <input className="inp" value={link} onChange={e => setLink(e.target.value)} placeholder="https://..." />
                 </div>
                 <div className="fi">
-                  <label className="fl">Quantity ({(selected.min_qty||0).toLocaleString()} – {(selected.max_qty||0).toLocaleString()})</label>
+                  <label className="fl">Quantity ({(selected.min_qty || 0).toLocaleString()} – {(selected.max_qty || 0).toLocaleString()})</label>
                   <input className="inp" type="number" value={qty}
                     onChange={e => setQty(e.target.value)}
-                    min={selected.min_qty} max={selected.max_qty} style={{ fontSize:'16px' }} />
+                    min={selected.min_qty} max={selected.max_qty} />
                 </div>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', padding:'10px 13px', borderRadius:'8px', background:'rgba(0,0,0,.3)', border:'1px solid var(--br)' }}>
-                  <span style={{ fontSize:'11px', color:'var(--text2)' }}>Total Cost</span>
-                  <span style={{ fontFamily:'var(--fm)', fontSize:'18px', fontWeight:700, color:'var(--gold)' }}>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  marginBottom: '14px', padding: '10px 13px', borderRadius: '8px',
+                  background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)'
+                }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text2)' }}>Total Cost</span>
+                  <span style={{ fontFamily: 'var(--fm)', fontSize: '18px', fontWeight: 700, color: 'var(--gold)' }}>
                     {format(parseFloat(cost))}
                   </span>
                 </div>
                 {orderError && (
-                  <div style={{ background:'rgba(255,50,80,.08)', border:'1px solid rgba(255,50,80,.2)', borderRadius:'7px', padding:'10px', color:'#ff6b6b', fontSize:'12px', marginBottom:'12px' }}>
+                  <div style={{
+                    background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)',
+                    borderRadius: '7px', padding: '10px', color: '#ff6b6b', fontSize: '12px', marginBottom: '12px'
+                  }}>
                     {orderError}
                   </div>
                 )}
