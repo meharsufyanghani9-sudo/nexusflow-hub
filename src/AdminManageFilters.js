@@ -6,9 +6,9 @@ import { supabase } from './supabase';
 // ─────────────────────────────────────────────────────────
 function Toast({ msg, type }) {
   if (!msg) return null;
-  const bg     = type === 'error' ? 'rgba(255,50,80,.10)'   : 'rgba(0,255,136,.08)';
-  const border = type === 'error' ? '1px solid rgba(255,50,80,.25)' : '1px solid rgba(0,255,136,.25)';
-  const color  = type === 'error' ? '#ff6b6b' : 'var(--green)';
+  const bg     = type === 'error' ? 'rgba(255,50,80,.10)'             : 'rgba(0,255,136,.08)';
+  const border = type === 'error' ? '1px solid rgba(255,50,80,.25)'   : '1px solid rgba(0,255,136,.25)';
+  const color  = type === 'error' ? '#ff6b6b'                        : 'var(--green)';
   return (
     <div style={{ background: bg, border, borderRadius: '8px', padding: '11px 14px',
       color, fontWeight: 700, fontSize: '12px', marginBottom: '16px',
@@ -35,45 +35,35 @@ function StageBadge({ label, color }) {
 // ─────────────────────────────────────────────────────────
 function ServicePickerModal({
   title,
-  allServices,       // pool of services to display in this modal
-  alreadyLinked,     // Set<serviceId> — already saved in DB for this filter
-  onSave,            // fn(addedIds[], removedIds[]) — called on "Save Selection"
+  allServices,
+  alreadyLinked,
+  onSave,
   onClose,
-  customPrices,      // { serviceId: price } — current custom prices for all services
-  onSavePrices,      // fn(Map<serviceId, number>) — called on "Save Prices"
+  customPrices,
+  onSavePrices,
 }) {
-  // ── tab: 'services' | 'prices' ──────────────────────
-  const [tab, setTab] = useState('services');
-
-  // ── services tab state ───────────────────────────────
-  const [search,   setSearch]   = useState('');
-  const [selected, setSelected] = useState(new Set(alreadyLinked));
-  const [saving,   setSaving]   = useState(false);
-
-  // ── prices tab state ─────────────────────────────────
-  const [priceMode,      setPriceMode]      = useState('manual');   // 'manual' | 'percent'
-  const [bulkPercent,    setBulkPercent]    = useState('');
-  const [bulkDirection,  setBulkDirection]  = useState('increase');
-  const [priceEdits,     setPriceEdits]     = useState(() => {
-    // Pre-fill any existing custom prices into the edit map
+  const [tab,           setTab]           = useState('services');
+  const [search,        setSearch]        = useState('');
+  const [selected,      setSelected]      = useState(new Set(alreadyLinked));
+  const [saving,        setSaving]        = useState(false);
+  const [priceMode,     setPriceMode]     = useState('manual');
+  const [bulkPercent,   setBulkPercent]   = useState('');
+  const [bulkDirection, setBulkDirection] = useState('increase');
+  const [priceEdits,    setPriceEdits]    = useState(() => {
     const m = new Map();
-    for (const [k, v] of Object.entries(customPrices || {})) {
-      m.set(k, String(v));
-    }
+    for (const [k, v] of Object.entries(customPrices || {})) m.set(k, String(v));
     return m;
   });
   const [savingPrices, setSavingPrices] = useState(false);
 
-  // ── filtered service list for this modal ─────────────
   const filtered = allServices.filter(s => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return (s.name      || '').toLowerCase().includes(q) ||
-           (s.platform  || '').toLowerCase().includes(q) ||
+    return (s.name     || '').toLowerCase().includes(q) ||
+           (s.platform || '').toLowerCase().includes(q) ||
            String(s.provider_service_id || '').includes(q);
   });
 
-  // ── checkbox helpers ──────────────────────────────────
   const toggle = (id) => {
     setSelected(prev => {
       const next = new Set(prev);
@@ -82,72 +72,40 @@ function ServicePickerModal({
     });
   };
 
-  const selectAllVisible = () => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      filtered.forEach(s => next.add(s.id));
-      return next;
-    });
-  };
+  const selectAllVisible  = () => setSelected(prev => { const n = new Set(prev); filtered.forEach(s => n.add(s.id)); return n; });
+  const clearAllVisible   = () => setSelected(prev => { const n = new Set(prev); filtered.forEach(s => n.delete(s.id)); return n; });
+  const selectAllInList   = () => setSelected(new Set(allServices.map(s => s.id)));
+  const clearAll          = () => setSelected(new Set());
 
-  const clearAllVisible = () => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      filtered.forEach(s => next.delete(s.id));
-      return next;
-    });
-  };
-
-  const selectAllInList = () => {
-    setSelected(new Set(allServices.map(s => s.id)));
-  };
-
-  const clearAll = () => {
-    setSelected(new Set());
-  };
-
-  // ── save services ─────────────────────────────────────
   const handleSave = async () => {
     setSaving(true);
     const added   = [];
     const removed = [];
-    for (const id of selected)      { if (!alreadyLinked.has(id)) added.push(id);   }
+    for (const id of selected)      { if (!alreadyLinked.has(id)) added.push(id); }
     for (const id of alreadyLinked) { if (!selected.has(id))      removed.push(id); }
     await onSave(added, removed);
     setSaving(false);
   };
 
-  // ── price helpers ─────────────────────────────────────
   const setPrice = (serviceId, val) => {
-    setPriceEdits(prev => {
-      const m = new Map(prev);
-      m.set(serviceId, val);
-      return m;
-    });
+    setPriceEdits(prev => { const m = new Map(prev); m.set(serviceId, val); return m; });
   };
 
   const applyBulkPercent = () => {
     const pct = parseFloat(bulkPercent);
     if (!pct || isNaN(pct)) return;
-    // Apply to every service that is currently checked
-    const servicesInFilter = allServices.filter(s => selected.has(s.id));
+    const inFilter = allServices.filter(s => selected.has(s.id));
     setPriceEdits(prev => {
       const m = new Map(prev);
-      for (const s of servicesInFilter) {
-        // Base = existing custom price if set, else original price_per_1k
-        const base = parseFloat(
-          customPrices?.[s.id] != null ? customPrices[s.id] : s.price_per_1k
-        ) || 0;
-        const newPrice = bulkDirection === 'increase'
-          ? base * (1 + pct / 100)
-          : base * (1 - pct / 100);
-        m.set(s.id, Math.max(0, newPrice).toFixed(6));
+      for (const s of inFilter) {
+        const base = parseFloat(customPrices?.[s.id] != null ? customPrices[s.id] : s.price_per_1k) || 0;
+        const newP = bulkDirection === 'increase' ? base * (1 + pct / 100) : base * (1 - pct / 100);
+        m.set(s.id, Math.max(0, newP).toFixed(6));
       }
       return m;
     });
   };
 
-  // ── save prices ───────────────────────────────────────
   const handleSavePrices = async () => {
     setSavingPrices(true);
     const finalMap = new Map();
@@ -161,7 +119,6 @@ function ServicePickerModal({
 
   const servicesInFilter = allServices.filter(s => selected.has(s.id));
 
-  // ── render ────────────────────────────────────────────
   return (
     <div className="mlay" onClick={onClose} style={{ zIndex: 800 }}>
       <div className="mbox" onClick={e => e.stopPropagation()}
@@ -176,7 +133,8 @@ function ServicePickerModal({
             </div>
           </div>
           <button onClick={onClose}
-            style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '22px', lineHeight: 1, flexShrink: 0 }}>×</button>
+            style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer',
+              fontSize: '22px', lineHeight: 1, flexShrink: 0 }}>×</button>
         </div>
 
         {/* Tabs */}
@@ -191,17 +149,15 @@ function ServicePickerModal({
           </button>
         </div>
 
-        {/* ── TAB: SERVICES ── */}
+        {/* ── SERVICES TAB ── */}
         {tab === 'services' && (
           <>
-            {/* Search */}
             <div style={{ marginBottom: '8px', flexShrink: 0 }}>
               <input className="srch-inp" style={{ width: '100%', boxSizing: 'border-box' }}
                 placeholder="🔍 Search by name, platform or service ID..."
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
 
-            {/* Bulk selection buttons */}
             <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', flexWrap: 'wrap', flexShrink: 0 }}>
               <button className="btn bgh bsm" onClick={selectAllVisible} style={{ flex: 1 }}>
                 ✅ Select Visible ({filtered.length})
@@ -217,7 +173,6 @@ function ServicePickerModal({
               </button>
             </div>
 
-            {/* Service list */}
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
               {filtered.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
@@ -225,7 +180,7 @@ function ServicePickerModal({
                 </div>
               ) : (
                 filtered.map(s => {
-                  const isOn = selected.has(s.id);
+                  const isOn      = selected.has(s.id);
                   const hasCustom = customPrices?.[s.id] != null;
                   return (
                     <div key={s.id} onClick={() => toggle(s.id)}
@@ -236,7 +191,6 @@ function ServicePickerModal({
                         background: isOn ? 'rgba(0,212,255,.07)' : 'rgba(0,0,0,.2)',
                         border: `1px solid ${isOn ? 'rgba(0,212,255,.3)' : 'var(--br)'}`,
                       }}>
-                      {/* Checkbox */}
                       <div style={{
                         width: '18px', height: '18px', borderRadius: '4px', flexShrink: 0,
                         border: `2px solid ${isOn ? 'var(--neon)' : 'var(--br2)'}`,
@@ -246,7 +200,6 @@ function ServicePickerModal({
                       }}>
                         {isOn ? '✓' : ''}
                       </div>
-                      {/* Service info */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
                           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -260,9 +213,7 @@ function ServicePickerModal({
                             </span>
                           )}
                           {' · '}
-                          <span style={{ color: 'var(--gold)' }}>
-                            ${parseFloat(s.price_per_1k).toFixed(4)}/1k
-                          </span>
+                          <span style={{ color: 'var(--gold)' }}>${parseFloat(s.price_per_1k).toFixed(4)}/1k</span>
                         </div>
                       </div>
                       {hasCustom && (
@@ -278,17 +229,15 @@ function ServicePickerModal({
               )}
             </div>
 
-            {/* Save button */}
             <button className="btn bp blg bw" onClick={handleSave} disabled={saving} style={{ flexShrink: 0 }}>
               {saving ? '⏳ Saving...' : `💾 Save Selection (${selected.size} services)`}
             </button>
           </>
         )}
 
-        {/* ── TAB: PRICES ── */}
+        {/* ── PRICES TAB ── */}
         {tab === 'prices' && (
           <>
-            {/* Mode Toggle */}
             <div style={{ marginBottom: '12px', flexShrink: 0 }}>
               <div style={{ fontSize: '9px', color: 'var(--text3)', marginBottom: '7px',
                 textTransform: 'uppercase', letterSpacing: '2px' }}>
@@ -306,12 +255,9 @@ function ServicePickerModal({
               </div>
             </div>
 
-            {/* Bulk percent controls */}
             {priceMode === 'percent' && (
-              <div style={{
-                padding: '12px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0,
-                background: 'rgba(0,212,255,.04)', border: '1px solid rgba(0,212,255,.15)',
-              }}>
+              <div style={{ padding: '12px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0,
+                background: 'rgba(0,212,255,.04)', border: '1px solid rgba(0,212,255,.15)' }}>
                 <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '8px',
                   textTransform: 'uppercase', letterSpacing: '1.5px' }}>
                   Applies to all {servicesInFilter.length} selected services
@@ -334,7 +280,6 @@ function ServicePickerModal({
               </div>
             )}
 
-            {/* Per-service price list */}
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
               {servicesInFilter.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
@@ -342,42 +287,35 @@ function ServicePickerModal({
                 </div>
               ) : (
                 servicesInFilter.map(s => {
-                  const origPrice  = parseFloat(s.price_per_1k).toFixed(6);
-                  const editVal    = priceEdits.get(s.id) ?? '';
-                  const hasCustom  = customPrices?.[s.id] != null;
+                  const origPrice = parseFloat(s.price_per_1k).toFixed(6);
+                  const editVal   = priceEdits.get(s.id) ?? '';
+                  const hasCustom = customPrices?.[s.id] != null;
                   return (
-                    <div key={s.id} style={{
-                      padding: '10px 12px', borderRadius: '8px', marginBottom: '6px',
-                      background: 'rgba(0,0,0,.2)', border: '1px solid var(--br)',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {s.name}
-                          </div>
-                          <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '2px' }}>
-                            Original: <span style={{ color: 'var(--gold)' }}>${origPrice}/1k</span>
-                            {hasCustom && (
-                              <span style={{ marginLeft: '8px', color: 'var(--neon)' }}>
-                                Current custom: ${parseFloat(customPrices[s.id]).toFixed(6)}/1k
-                              </span>
-                            )}
-                          </div>
+                    <div key={s.id} style={{ padding: '10px 12px', borderRadius: '8px', marginBottom: '6px',
+                      background: 'rgba(0,0,0,.2)', border: '1px solid var(--br)' }}>
+                      <div style={{ flex: 1, minWidth: 0, marginBottom: '6px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {s.name}
+                        </div>
+                        <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '2px' }}>
+                          Original: <span style={{ color: 'var(--gold)' }}>${origPrice}/1k</span>
+                          {hasCustom && (
+                            <span style={{ marginLeft: '8px', color: 'var(--neon)' }}>
+                              Current custom: ${parseFloat(customPrices[s.id]).toFixed(6)}/1k
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                         <span style={{ fontSize: '11px', color: 'var(--text3)', flexShrink: 0 }}>$ New Price</span>
                         <input className="inp" type="number" step="0.0001"
-                          placeholder={origPrice}
-                          value={editVal}
+                          placeholder={origPrice} value={editVal}
                           onChange={e => setPrice(s.id, e.target.value)}
                           style={{ flex: 1, padding: '6px 10px' }} />
                         <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>/1k</span>
                         {editVal && (
-                          <button className="btn bgh bsm" onClick={() => setPrice(s.id, '')}>
-                            ↺
-                          </button>
+                          <button className="btn bgh bsm" onClick={() => setPrice(s.id, '')}>↺</button>
                         )}
                       </div>
                     </div>
@@ -386,10 +324,9 @@ function ServicePickerModal({
               )}
             </div>
 
-            {/* Save prices */}
             <button className="btn bp blg bw" onClick={handleSavePrices} disabled={savingPrices}
               style={{ flexShrink: 0 }}>
-              {savingPrices ? '⏳ Saving...' : `💾 Save Custom Prices`}
+              {savingPrices ? '⏳ Saving...' : '💾 Save Custom Prices'}
             </button>
           </>
         )}
@@ -447,11 +384,11 @@ function FilterFormModal({ onSave, onClose, title }) {
         <div style={{ marginBottom: '14px', padding: '10px 14px', borderRadius: '8px',
           background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)',
           display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            width: '44px', height: '44px', borderRadius: '10px', flexShrink: 0,
+          <div style={{ width: '44px', height: '44px', borderRadius: '10px', flexShrink: 0,
             background: `${color}18`, border: `1.5px solid ${color}40`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px',
-          }}>{icon || '🌐'}</div>
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+            {icon || '🌐'}
+          </div>
           <div style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text)' }}>{name || 'Filter Name'}</div>
         </div>
         <button className="btn bp blg bw" onClick={handleSave} disabled={saving || !name.trim()}>
@@ -463,9 +400,11 @@ function FilterFormModal({ onSave, onClose, title }) {
 }
 
 // ─────────────────────────────────────────────────────────
-// FILTER CARD (grid tile for one filter)
+// FILTER CARD
+// isActive = true means this card is currently "selected" by admin
+// and shows a glowing border so admin knows which filter context they are in
 // ─────────────────────────────────────────────────────────
-function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial }) {
+function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial, isActive }) {
   const [hover, setHover] = useState(false);
   const color = item.color || '#00d4ff';
 
@@ -479,13 +418,18 @@ function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial 
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: '6px', padding: '12px 8px', borderRadius: '12px',
           cursor: isSpecial ? 'default' : 'pointer',
-          background: `${color}0d`, border: `1.5px solid ${color}30`,
+          // When isActive: strong glowing border + brighter background to show "you are here"
+          background: isActive ? `${color}22` : `${color}0d`,
+          border: isActive
+            ? `2.5px solid ${color}`
+            : `1.5px solid ${color}30`,
+          boxShadow: isActive ? `0 0 12px ${color}55` : 'none',
           transition: 'all .15s', minHeight: '80px', position: 'relative',
           userSelect: 'none',
         }}>
         <div style={{ fontSize: '22px' }}>{item.icon}</div>
-        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text)',
-          textAlign: 'center', lineHeight: 1.2 }}>
+        <div style={{ fontSize: '10px', fontWeight: isActive ? 900 : 700,
+          color: isActive ? color : 'var(--text)', textAlign: 'center', lineHeight: 1.2 }}>
           {item.name}
         </div>
         {serviceCount != null && (
@@ -493,7 +437,18 @@ function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial 
             {serviceCount} svc{serviceCount !== 1 ? 's' : ''}
           </div>
         )}
-        {/* Delete button — visible on hover, hidden for special "All/Everything" items */}
+        {/* "ACTIVE" badge shown when this filter is selected */}
+        {isActive && (
+          <div style={{
+            position: 'absolute', top: '-8px', left: '50%', transform: 'translateX(-50%)',
+            background: color, color: '#000', fontSize: '7px', fontWeight: 900,
+            padding: '1px 6px', borderRadius: '6px', letterSpacing: '0.5px',
+            textTransform: 'uppercase', whiteSpace: 'nowrap',
+          }}>
+            SELECTED
+          </div>
+        )}
+        {/* Delete button on hover — hidden for special All/Everything items */}
         {hover && !isSpecial && (
           <button
             onClick={e => { e.stopPropagation(); onDelete(item); }}
@@ -516,23 +471,31 @@ function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial 
 // ─────────────────────────────────────────────────────────
 export default function AdminManageFilters() {
 
-  // ── All services (loaded once) ────────────────────────
+  // ── All services ──────────────────────────────────────
   const [allServices, setAllServices] = useState([]);
 
   // ── Stage 1: Platforms ────────────────────────────────
-  const [platforms,         setPlatforms]         = useState([]);
-  const [platformServiceMap, setPlatformServiceMap] = useState({}); // platformId -> Set<serviceId>
+  const [platforms,          setPlatforms]          = useState([]);
+  const [platformServiceMap, setPlatformServiceMap] = useState({});
 
   // ── Stage 2: Service Types ────────────────────────────
-  const [serviceTypes,    setServiceTypes]    = useState([]);
-  const [serviceTypeMap,  setServiceTypeMap]  = useState({}); // serviceTypeId -> Set<serviceId>
+  const [serviceTypes,   setServiceTypes]   = useState([]);
+  const [serviceTypeMap, setServiceTypeMap] = useState({});
 
   // ── Stage 3: Filter Types ─────────────────────────────
   const [filterTypes,   setFilterTypes]   = useState([]);
-  const [filterTypeMap, setFilterTypeMap] = useState({}); // filterTypeId -> Set<serviceId>
+  const [filterTypeMap, setFilterTypeMap] = useState({});
 
   // ── Custom prices ─────────────────────────────────────
-  const [customPrices, setCustomPrices] = useState({}); // serviceId -> price
+  const [customPrices, setCustomPrices] = useState({});
+
+  // ── ACTIVE SELECTION STATE ────────────────────────────
+  // These remember WHICH filter card the admin last tapped in each stage
+  // so the card stays highlighted (glowing border) even after the picker modal closes.
+  // This helps admin know their current context when moving between stages.
+  const [activePlatformId,    setActivePlatformId]    = useState(null);
+  const [activeServiceTypeId, setActiveServiceTypeId] = useState(null);
+  const [activeFilterTypeId,  setActiveFilterTypeId]  = useState(null);
 
   // ── UI ────────────────────────────────────────────────
   const [loading,      setLoading]      = useState(true);
@@ -540,19 +503,19 @@ export default function AdminManageFilters() {
   const [searchStage1, setSearchStage1] = useState('');
   const [searchStage2, setSearchStage2] = useState('');
   const [searchStage3, setSearchStage3] = useState('');
-  const [addModal,     setAddModal]     = useState(null);   // { stage: 1|2|3 }
-  const [pickerModal,  setPickerModal]  = useState(null);   // { stage, item, poolServices, alreadyLinked }
+  const [addModal,     setAddModal]     = useState(null);
+  const [pickerModal,  setPickerModal]  = useState(null);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
   };
 
-  // ── loadAll — fetches everything from DB ──────────────
+  // ── loadAll ───────────────────────────────────────────
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      // ── Load ALL services (handles 2500+ by paginating in batches of 1000) ──
+      // Load ALL services — paginate in batches to handle 2500+
       const BATCH = 1000;
       let allSvc  = [];
       let from    = 0;
@@ -567,22 +530,17 @@ export default function AdminManageFilters() {
         if (error) throw error;
         if (!data || data.length === 0) break;
         allSvc = [...allSvc, ...data];
-        if (data.length < BATCH) break;   // last page — done
+        if (data.length < BATCH) break;
         from += BATCH;
       }
       setAllServices(allSvc);
 
-      // ── Stage 1: platforms ────────────────────────────
+      // Stage 1
       const { data: plats } = await supabase
-        .from('filter_platforms')
-        .select('*')
-        .order('sort_order')
-        .order('created_at');
+        .from('filter_platforms').select('*').order('sort_order').order('created_at');
       setPlatforms(plats || []);
 
-      const { data: platSvc } = await supabase
-        .from('filter_platform_services')
-        .select('*');
+      const { data: platSvc } = await supabase.from('filter_platform_services').select('*');
       const pm = {};
       (platSvc || []).forEach(r => {
         if (!pm[r.platform_id]) pm[r.platform_id] = new Set();
@@ -590,17 +548,12 @@ export default function AdminManageFilters() {
       });
       setPlatformServiceMap(pm);
 
-      // ── Stage 2: service types ────────────────────────
+      // Stage 2
       const { data: svcTypes } = await supabase
-        .from('filter_service_types')
-        .select('*')
-        .order('sort_order')
-        .order('created_at');
+        .from('filter_service_types').select('*').order('sort_order').order('created_at');
       setServiceTypes(svcTypes || []);
 
-      const { data: svcTypeSvc } = await supabase
-        .from('filter_service_type_services')
-        .select('*');
+      const { data: svcTypeSvc } = await supabase.from('filter_service_type_services').select('*');
       const stm = {};
       (svcTypeSvc || []).forEach(r => {
         if (!stm[r.service_type_id]) stm[r.service_type_id] = new Set();
@@ -608,17 +561,12 @@ export default function AdminManageFilters() {
       });
       setServiceTypeMap(stm);
 
-      // ── Stage 3: filter types ─────────────────────────
+      // Stage 3
       const { data: ftypes } = await supabase
-        .from('filter_types')
-        .select('*')
-        .order('sort_order')
-        .order('created_at');
+        .from('filter_types').select('*').order('sort_order').order('created_at');
       setFilterTypes(ftypes || []);
 
-      const { data: ftypeSvc } = await supabase
-        .from('filter_type_services')
-        .select('*');
+      const { data: ftypeSvc } = await supabase.from('filter_type_services').select('*');
       const ftm = {};
       (ftypeSvc || []).forEach(r => {
         if (!ftm[r.filter_type_id]) ftm[r.filter_type_id] = new Set();
@@ -626,10 +574,8 @@ export default function AdminManageFilters() {
       });
       setFilterTypeMap(ftm);
 
-      // ── Custom prices ─────────────────────────────────
-      const { data: prices } = await supabase
-        .from('service_custom_prices')
-        .select('*');
+      // Custom prices
+      const { data: prices } = await supabase.from('service_custom_prices').select('*');
       const cp = {};
       (prices || []).forEach(r => { cp[r.service_id] = r.custom_price; });
       setCustomPrices(cp);
@@ -642,7 +588,7 @@ export default function AdminManageFilters() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // ── Add a new filter ──────────────────────────────────
+  // ── Add filter ────────────────────────────────────────
   const handleAddFilter = async ({ name, icon, color, slug }) => {
     const stage = addModal?.stage;
     try {
@@ -667,16 +613,19 @@ export default function AdminManageFilters() {
     }
   };
 
-  // ── Delete a filter ───────────────────────────────────
+  // ── Delete filter ─────────────────────────────────────
   const handleDeleteFilter = async (stage, item) => {
     if (!window.confirm(`Delete "${item.name}"? All service links for this filter will also be removed.`)) return;
     try {
       if (stage === 1) {
         await supabase.from('filter_platforms').delete().eq('id', item.id);
+        if (activePlatformId === item.id) setActivePlatformId(null);
       } else if (stage === 2) {
         await supabase.from('filter_service_types').delete().eq('id', item.id);
+        if (activeServiceTypeId === item.id) setActiveServiceTypeId(null);
       } else if (stage === 3) {
         await supabase.from('filter_types').delete().eq('id', item.id);
+        if (activeFilterTypeId === item.id) setActiveFilterTypeId(null);
       }
       showToast('Filter deleted!');
       await loadAll();
@@ -685,47 +634,53 @@ export default function AdminManageFilters() {
     }
   };
 
-  // ── Open Service Picker ───────────────────────────────
-  // BUG FIX: Stage 2 pool = only services inside the CURRENTLY TAPPED platform filter
-  //          Stage 3 pool = only services inside the CURRENTLY TAPPED service type filter
+  // ── Open service picker ───────────────────────────────
+  // Also sets the active selection for the tapped stage so the card stays highlighted
   const openPicker = (stage, item) => {
-    let poolServices   = [];
-    let alreadyLinked  = new Set();
+    let poolServices  = [];
+    let alreadyLinked = new Set();
 
     if (stage === 1) {
-      // Stage 1: Pool is ALL services — admin decides what belongs to this platform
+      // Set stage 1 active — stays highlighted so admin knows context when going to stage 2
+      setActivePlatformId(item.id);
       poolServices  = allServices;
       alreadyLinked = platformServiceMap[item.id] || new Set();
 
     } else if (stage === 2) {
-      // Stage 2: Pool is ONLY the services that are already linked to THIS service-type item's
-      // corresponding platform.
-      // Since service types are global (not per-platform), we show all services that have
-      // been added to ANY platform filter so far — that way admin only assigns organised services.
-      // ──────────────────────────────────────────────────────────────────────────────────────────
-      // Gather every service ID that appears in at least one platform filter
-      const platformLinkedIds = new Set();
-      Object.values(platformServiceMap).forEach(set => {
-        set.forEach(id => platformLinkedIds.add(id));
-      });
-      poolServices = platformLinkedIds.size > 0
-        ? allServices.filter(s => platformLinkedIds.has(s.id))
-        : allServices;   // fallback: show all if no platform links yet
+      // Set stage 2 active
+      setActiveServiceTypeId(item.id);
+      // Pool = services already added to the CURRENTLY ACTIVE platform filter
+      // If admin has an active platform selected, show only those services
+      // Otherwise show all services that exist in any platform filter
+      if (activePlatformId && platformServiceMap[activePlatformId]) {
+        const allowedIds = platformServiceMap[activePlatformId];
+        poolServices = allServices.filter(s => allowedIds.has(s.id));
+      } else {
+        // Fallback: show all services that belong to ANY platform filter
+        const platformLinkedIds = new Set();
+        Object.values(platformServiceMap).forEach(set => set.forEach(id => platformLinkedIds.add(id)));
+        poolServices = platformLinkedIds.size > 0
+          ? allServices.filter(s => platformLinkedIds.has(s.id))
+          : allServices;
+      }
       alreadyLinked = serviceTypeMap[item.id] || new Set();
 
     } else if (stage === 3) {
-      // Stage 3: Pool is ONLY the services that are linked to the SAME-NAMED service-type filter.
-      // i.e. if admin opens "Guaranteed" filter type, only show services that are already
-      // assigned in Stage 2 (service type filters).
-      // ──────────────────────────────────────────────────────────────────────────────────────────
-      // Gather every service ID that appears in at least one service-type filter
-      const serviceTypeLinkedIds = new Set();
-      Object.values(serviceTypeMap).forEach(set => {
-        set.forEach(id => serviceTypeLinkedIds.add(id));
-      });
-      poolServices = serviceTypeLinkedIds.size > 0
-        ? allServices.filter(s => serviceTypeLinkedIds.has(s.id))
-        : allServices;   // fallback: show all if no service-type links yet
+      // Set stage 3 active
+      setActiveFilterTypeId(item.id);
+      // Pool = services already added to the CURRENTLY ACTIVE service type filter
+      // If admin has an active service type selected, show only those services
+      // Otherwise show all services that belong to ANY service type filter
+      if (activeServiceTypeId && serviceTypeMap[activeServiceTypeId]) {
+        const allowedIds = serviceTypeMap[activeServiceTypeId];
+        poolServices = allServices.filter(s => allowedIds.has(s.id));
+      } else {
+        const serviceTypeLinkedIds = new Set();
+        Object.values(serviceTypeMap).forEach(set => set.forEach(id => serviceTypeLinkedIds.add(id)));
+        poolServices = serviceTypeLinkedIds.size > 0
+          ? allServices.filter(s => serviceTypeLinkedIds.has(s.id))
+          : allServices;
+      }
       alreadyLinked = filterTypeMap[item.id] || new Set();
     }
 
@@ -794,16 +749,15 @@ export default function AdminManageFilters() {
     }
   };
 
-  // ── Filtered cards per stage (for search) ────────────
-  const filteredPlatforms = platforms.filter(p =>
-    !searchStage1 || p.name.toLowerCase().includes(searchStage1.toLowerCase())
-  );
-  const filteredServiceTypes = serviceTypes.filter(st =>
-    !searchStage2 || st.name.toLowerCase().includes(searchStage2.toLowerCase())
-  );
-  const filteredFilterTypes = filterTypes.filter(ft =>
-    !searchStage3 || ft.name.toLowerCase().includes(searchStage3.toLowerCase())
-  );
+  // ── Search filtered cards ─────────────────────────────
+  const filteredPlatforms    = platforms.filter(p =>    !searchStage1 || p.name.toLowerCase().includes(searchStage1.toLowerCase()));
+  const filteredServiceTypes = serviceTypes.filter(st => !searchStage2 || st.name.toLowerCase().includes(searchStage2.toLowerCase()));
+  const filteredFilterTypes  = filterTypes.filter(ft =>  !searchStage3 || ft.name.toLowerCase().includes(searchStage3.toLowerCase()));
+
+  // Active item names for the context banner
+  const activePlatform    = platforms.find(p  => p.id  === activePlatformId);
+  const activeServiceType = serviceTypes.find(s => s.id === activeServiceTypeId);
+  const activeFilterType  = filterTypes.find(f  => f.id === activeFilterTypeId);
 
   // ─────────────────────────────────────────────────────
   // RENDER
@@ -823,8 +777,8 @@ export default function AdminManageFilters() {
     <div>
       <Toast msg={toast.msg} type={toast.type} />
 
-      {/* ── Page header ── */}
-      <div style={{ marginBottom: '20px' }}>
+      {/* Page header */}
+      <div style={{ marginBottom: '18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
           <div style={{
             width: '38px', height: '38px', borderRadius: '10px', flexShrink: 0,
@@ -838,29 +792,80 @@ export default function AdminManageFilters() {
             </div>
           </div>
         </div>
-        {/* How it works */}
         <div style={{
-          padding: '12px 14px', borderRadius: '8px', marginTop: '10px',
+          padding: '10px 14px', borderRadius: '8px', marginTop: '8px',
           background: 'rgba(0,212,255,.04)', border: '1px solid rgba(0,212,255,.15)',
           fontSize: '11px', color: 'var(--text3)', lineHeight: 1.7,
         }}>
           <strong style={{ color: 'var(--neon)' }}>How it works:</strong>&nbsp;
-          User clicks a <strong style={{ color: 'var(--text)' }}>Platform</strong> (Stage 1) →
-          sees services you added to that platform →
-          picks a <strong style={{ color: 'var(--text)' }}>Service Type</strong> (Stage 2) →
-          sees filtered services →
-          picks a <strong style={{ color: 'var(--text)' }}>Filter Type</strong> (Stage 3) like Guaranteed or Non-Drop.
-          <br />
-          <strong style={{ color: 'var(--gold)' }}>Tap any filter card</strong> to add/remove services.&nbsp;
-          <strong style={{ color: 'var(--gold)' }}>Hover over a card</strong> to see the delete (×) button.
+          User clicks a <strong style={{ color: 'var(--text)' }}>Platform</strong> →
+          picks a <strong style={{ color: 'var(--text)' }}>Service Type</strong> →
+          picks a <strong style={{ color: 'var(--text)' }}>Filter Type</strong>.
           &nbsp;·&nbsp;
-          <strong style={{ color: 'var(--neon)' }}>{allServices.length} total services loaded.</strong>
+          <strong style={{ color: 'var(--gold)' }}>Tap a card</strong> to manage its services.
+          &nbsp;·&nbsp;
+          <strong style={{ color: 'var(--gold)' }}>Hover a card</strong> to delete it.
+          &nbsp;·&nbsp;
+          <strong style={{ color: 'var(--neon)' }}>{allServices.length.toLocaleString()} services loaded.</strong>
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════ */}
-      {/* STAGE 1: SELECT PLATFORM                       */}
-      {/* ══════════════════════════════════════════════ */}
+      {/* ─── ACTIVE CONTEXT BANNER ─────────────────────── */}
+      {/* Shows admin their current selection chain so they always know their context */}
+      {(activePlatform || activeServiceType || activeFilterType) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap',
+          padding: '10px 14px', borderRadius: '8px', marginBottom: '16px',
+          background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.2)',
+          fontSize: '11px',
+        }}>
+          <span style={{ color: 'var(--text3)', fontWeight: 600 }}>📍 Working in:</span>
+          {activePlatform && (
+            <span style={{
+              padding: '3px 10px', borderRadius: '10px', fontWeight: 700,
+              background: `${activePlatform.color || '#00d4ff'}20`,
+              border: `1px solid ${activePlatform.color || '#00d4ff'}50`,
+              color: activePlatform.color || '#00d4ff',
+            }}>
+              {activePlatform.icon} {activePlatform.name}
+            </span>
+          )}
+          {activePlatform && activeServiceType && (
+            <span style={{ color: 'var(--text3)' }}>→</span>
+          )}
+          {activeServiceType && (
+            <span style={{
+              padding: '3px 10px', borderRadius: '10px', fontWeight: 700,
+              background: 'rgba(123,47,255,.2)', border: '1px solid rgba(123,47,255,.4)',
+              color: '#b07eff',
+            }}>
+              {activeServiceType.icon} {activeServiceType.name}
+            </span>
+          )}
+          {activeServiceType && activeFilterType && (
+            <span style={{ color: 'var(--text3)' }}>→</span>
+          )}
+          {activeFilterType && (
+            <span style={{
+              padding: '3px 10px', borderRadius: '10px', fontWeight: 700,
+              background: 'rgba(255,215,0,.12)', border: '1px solid rgba(255,215,0,.3)',
+              color: 'var(--gold)',
+            }}>
+              {activeFilterType.icon} {activeFilterType.name}
+            </span>
+          )}
+          <button
+            onClick={() => { setActivePlatformId(null); setActiveServiceTypeId(null); setActiveFilterTypeId(null); }}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text3)',
+              cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}>
+            Clear selection
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════ */}
+      {/* STAGE 1: SELECT PLATFORM                        */}
+      {/* ═══════════════════════════════════════════════ */}
       <div style={{ marginBottom: '28px' }}>
         <div className="st">
           <StageBadge label="Stage 1" color="#00d4ff" />
@@ -881,6 +886,7 @@ export default function AdminManageFilters() {
               key={item.id}
               item={item}
               isSpecial={item.slug === 'everything'}
+              isActive={item.id === activePlatformId}
               serviceCount={item.slug === 'everything' ? null : (platformServiceMap[item.id]?.size || 0)}
               onDelete={it => handleDeleteFilter(1, it)}
               onManageServices={it => openPicker(1, it)}
@@ -889,13 +895,18 @@ export default function AdminManageFilters() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════ */}
-      {/* STAGE 2: SELECT SERVICE TYPE                   */}
-      {/* ══════════════════════════════════════════════ */}
+      {/* ═══════════════════════════════════════════════ */}
+      {/* STAGE 2: SELECT SERVICE TYPE                    */}
+      {/* ═══════════════════════════════════════════════ */}
       <div style={{ marginBottom: '28px' }}>
         <div className="st">
           <StageBadge label="Stage 2" color="#7b2fff" />
           &nbsp; Select Service
+          {activePlatform && (
+            <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, marginLeft: '8px' }}>
+              — showing services for {activePlatform.icon} {activePlatform.name}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
           <input className="srch-inp" style={{ flex: 1 }}
@@ -903,11 +914,9 @@ export default function AdminManageFilters() {
             value={searchStage2} onChange={e => setSearchStage2(e.target.value)} />
           <button className="btn bsm"
             onClick={() => setAddModal({ stage: 2 })}
-            style={{
-              flexShrink: 0, padding: '8px 16px', fontSize: '18px', lineHeight: 1,
+            style={{ flexShrink: 0, padding: '8px 16px', fontSize: '18px', lineHeight: 1,
               background: 'var(--purple)', color: '#fff', border: 'none',
-              borderRadius: '7px', cursor: 'pointer',
-            }}
+              borderRadius: '7px', cursor: 'pointer' }}
             title="Add new service type filter">+</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>
@@ -916,6 +925,7 @@ export default function AdminManageFilters() {
               key={item.id}
               item={{ ...item, color: '#7b2fff' }}
               isSpecial={item.slug === 'all'}
+              isActive={item.id === activeServiceTypeId}
               serviceCount={item.slug === 'all' ? null : (serviceTypeMap[item.id]?.size || 0)}
               onDelete={it => handleDeleteFilter(2, it)}
               onManageServices={it => openPicker(2, it)}
@@ -924,13 +934,18 @@ export default function AdminManageFilters() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════ */}
-      {/* STAGE 3: FILTER BY TYPE                        */}
-      {/* ══════════════════════════════════════════════ */}
+      {/* ═══════════════════════════════════════════════ */}
+      {/* STAGE 3: FILTER BY TYPE                         */}
+      {/* ═══════════════════════════════════════════════ */}
       <div style={{ marginBottom: '28px' }}>
         <div className="st">
           <StageBadge label="Stage 3" color="#ffd700" />
           &nbsp; Filter By Type
+          {activeServiceType && (
+            <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, marginLeft: '8px' }}>
+              — showing services for {activeServiceType.icon} {activeServiceType.name}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
           <input className="srch-inp" style={{ flex: 1 }}
@@ -938,11 +953,9 @@ export default function AdminManageFilters() {
             value={searchStage3} onChange={e => setSearchStage3(e.target.value)} />
           <button
             onClick={() => setAddModal({ stage: 3 })}
-            style={{
-              flexShrink: 0, padding: '8px 16px', fontSize: '18px', lineHeight: 1,
+            style={{ flexShrink: 0, padding: '8px 16px', fontSize: '18px', lineHeight: 1,
               background: 'linear-gradient(135deg,#b8860b,#ffd700)', color: '#000',
-              fontWeight: 800, border: 'none', borderRadius: '7px', cursor: 'pointer',
-            }}
+              fontWeight: 800, border: 'none', borderRadius: '7px', cursor: 'pointer' }}
             title="Add new filter type">+</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
@@ -951,6 +964,7 @@ export default function AdminManageFilters() {
               key={item.id}
               item={{ ...item, color: '#ffd700' }}
               isSpecial={item.slug === 'all'}
+              isActive={item.id === activeFilterTypeId}
               serviceCount={item.slug === 'all' ? null : (filterTypeMap[item.id]?.size || 0)}
               onDelete={it => handleDeleteFilter(3, it)}
               onManageServices={it => openPicker(3, it)}
@@ -959,25 +973,23 @@ export default function AdminManageFilters() {
         </div>
       </div>
 
-      {/* ── Custom prices info bar ── */}
+      {/* Custom prices info bar */}
       {Object.keys(customPrices).length > 0 && (
         <div style={{ marginBottom: '24px' }}>
           <div className="st">💹 Active Custom Prices</div>
-          <div style={{
-            padding: '12px 14px', borderRadius: '8px',
+          <div style={{ padding: '12px 14px', borderRadius: '8px',
             background: 'rgba(255,215,0,.04)', border: '1px solid rgba(255,215,0,.15)',
-            fontSize: '11px', color: 'var(--text3)',
-          }}>
+            fontSize: '11px', color: 'var(--text3)' }}>
             <strong style={{ color: 'var(--gold)' }}>
               {Object.keys(customPrices).length} service{Object.keys(customPrices).length !== 1 ? 's' : ''}
             </strong> have custom prices set.
-            These override both the default service price and the global API markup in Settings.
+            These override the default price and global markup in Settings.
             Open any filter card → Prices tab to edit or clear them.
           </div>
         </div>
       )}
 
-      {/* ── ADD FILTER MODAL ── */}
+      {/* ADD FILTER MODAL */}
       {addModal && (
         <FilterFormModal
           title={
@@ -990,7 +1002,7 @@ export default function AdminManageFilters() {
         />
       )}
 
-      {/* ── SERVICE PICKER MODAL ── */}
+      {/* SERVICE PICKER MODAL */}
       {pickerModal && (
         <ServicePickerModal
           title={
