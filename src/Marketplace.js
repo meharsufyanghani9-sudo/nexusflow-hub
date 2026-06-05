@@ -2,12 +2,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
+// ─────────────────────────────────────────────────────────
+// Platform icons and colors
+// ─────────────────────────────────────────────────────────
 const platformIcons = {
-  instagram: '📸', tiktok: '🎵', youtube: '▶️', twitter: '🐦',
-  facebook: '👤', telegram: '✈️', snapchat: '👻', linkedin: '💼',
-  spotify: '🎵', discord: '🎮', twitch: '🟣', google: '🔍',
-  whatsapp: '💬', website: '🌐', threads: '🧵', capcut: '🎬',
-  custom: '⚙️', other: '⚙️',
+  instagram: '📸', tiktok: '🎵', youtube: '▶️',  twitter: '🐦',
+  facebook:  '👤', telegram: '✈️', snapchat: '👻', linkedin: '💼',
+  spotify:   '🎵', discord: '🎮', twitch: '🟣',  google: '🔍',
+  whatsapp:  '💬', website: '🌐', threads: '🧵',  capcut: '🎬',
+  custom:    '⚙️', other: '⚙️',
 };
 const platformColors = {
   instagram: '#E1306C', tiktok: '#00d4ff', youtube: '#FF0000',
@@ -18,17 +21,19 @@ const platformColors = {
   threads:   '#888888', capcut:   '#00d4ff', other:    '#666666',
 };
 
-// How many services to show per "page" in infinite scroll
+// ─────────────────────────────────────────────────────────
+// Infinite scroll: show 20 cards, load 20 more on scroll
+// ─────────────────────────────────────────────────────────
 const PAGE_SIZE = 20;
 
 export default function Marketplace({ user, onNav }) {
   const { format } = useCurrency();
 
-  // ── All services (loaded once from DB) ───────────────
+  // ── All services loaded from DB ───────────────────────
   const [services,  setServices]  = useState([]);
   const [loading,   setLoading]   = useState(true);
 
-  // ── Filter data from DB ───────────────────────────────
+  // ── Filter tables from DB ─────────────────────────────
   const [filterPlatforms,    setFilterPlatforms]    = useState([]);
   const [filterServiceTypes, setFilterServiceTypes] = useState([]);
   const [filterTypes,        setFilterTypes]        = useState([]);
@@ -38,27 +43,33 @@ export default function Marketplace({ user, onNav }) {
   const [serviceTypeMap,     setServiceTypeMap]     = useState({});
   const [filterTypeMap,      setFilterTypeMap]      = useState({});
 
-  // Custom prices: serviceId -> custom_price
+  // Custom prices from admin: serviceId -> price
   const [customPrices, setCustomPrices] = useState({});
 
-  // ── User filter selections ────────────────────────────
+  // ── User's filter selections ──────────────────────────
   const [selPlatform,    setSelPlatform]    = useState(null);
   const [selServiceType, setSelServiceType] = useState(null);
   const [selFilterType,  setSelFilterType]  = useState(null);
-  // Price sort: '' | 'low' | 'high'
-  const [priceSort,      setPriceSort]      = useState('');
 
-  // ── Search ────────────────────────────────────────────
+  // ── Price sort: '' = default, 'low' = low→high, 'high' = high→low
+  const [priceSort, setPriceSort] = useState('');
+
+  // ── Search text ───────────────────────────────────────
   const [search, setSearch] = useState('');
 
-  // ── Infinite scroll: how many services are currently visible ──
+  // ── Infinite scroll ───────────────────────────────────
+  // visibleCount = how many Live services are shown at once
+  // Starts at PAGE_SIZE (20), grows by PAGE_SIZE each time
+  // user scrolls the bottom sentinel div into view
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loaderRef = useRef(null);
 
-  // ── Active top tab: 'featured' | 'live' ──────────────
+  // ── Active top tab ────────────────────────────────────
+  // 'featured' = show featured services tab
+  // 'live'     = show live services tab (with infinite scroll)
   const [activeTab, setActiveTab] = useState('featured');
 
-  // ── Order modal ───────────────────────────────────────
+  // ── Order modal state ─────────────────────────────────
   const [selected,   setSelected]   = useState(null);
   const [link,       setLink]       = useState('');
   const [qty,        setQty]        = useState('');
@@ -67,11 +78,19 @@ export default function Marketplace({ user, onNav }) {
   const [orderError, setOrderError] = useState('');
 
   // ─────────────────────────────────────────────────────
+  // Load everything on mount
+  // ─────────────────────────────────────────────────────
   useEffect(() => { loadEverything(); }, []);
 
-  // ── Infinite scroll IntersectionObserver ─────────────
+  // ─────────────────────────────────────────────────────
+  // IntersectionObserver for infinite scroll
+  // Watches the sentinel div at the bottom of the live list.
+  // When sentinel enters viewport → add PAGE_SIZE more visible items.
+  // Re-runs when loading finishes (so sentinel ref is attached).
+  // ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!loaderRef.current) return;
+    const sentinel = loaderRef.current;
+    if (!sentinel) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
@@ -80,20 +99,23 @@ export default function Marketplace({ user, onNav }) {
       },
       { threshold: 0.1 }
     );
-    observer.observe(loaderRef.current);
+    observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loading]);
+  }, [loading, activeTab]);
 
-  // Reset infinite scroll whenever any filter/sort/tab changes
+  // Reset visible count when filters/search/tab changes
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
   }, [selPlatform, selServiceType, selFilterType, priceSort, search, activeTab]);
 
   // ─────────────────────────────────────────────────────
+  // loadEverything — fetches ALL services + all filter data
+  // Uses while(true) batch loop to get past Supabase 1000 row limit
+  // ─────────────────────────────────────────────────────
   const loadEverything = async () => {
     setLoading(true);
     try {
-      // Load ALL services — batch-paginate to handle 2500+
+      // Load ALL services in batches of 1000 until none left
       const BATCH = 1000;
       let allSvc  = [];
       let from    = 0;
@@ -113,7 +135,7 @@ export default function Marketplace({ user, onNav }) {
       }
       setServices(allSvc);
 
-      // Filter platforms (stage 1)
+      // Stage 1: platform filters
       const { data: plats } = await supabase
         .from('filter_platforms')
         .select('*')
@@ -132,7 +154,7 @@ export default function Marketplace({ user, onNav }) {
       });
       setPlatformServiceMap(pm);
 
-      // Service types (stage 2)
+      // Stage 2: service type filters
       const { data: svcTypes } = await supabase
         .from('filter_service_types')
         .select('*')
@@ -151,7 +173,7 @@ export default function Marketplace({ user, onNav }) {
       });
       setServiceTypeMap(stm);
 
-      // Filter types (stage 3)
+      // Stage 3: filter types
       const { data: ftypes } = await supabase
         .from('filter_types')
         .select('*')
@@ -185,7 +207,8 @@ export default function Marketplace({ user, onNav }) {
   };
 
   // ─────────────────────────────────────────────────────
-  // Effective price: custom price from admin > default price
+  // Effective price for a service:
+  // admin custom price takes priority over default price_per_1k
   // ─────────────────────────────────────────────────────
   const effectivePrice = (s) => {
     if (customPrices[s.id] != null) return parseFloat(customPrices[s.id]);
@@ -196,27 +219,29 @@ export default function Marketplace({ user, onNav }) {
   const cl = (p) => platformColors[(p || '').toLowerCase()] || '#7b2fff';
 
   // ─────────────────────────────────────────────────────
-  // FILTERING + SORTING — runs on full in-memory array
+  // FILTERING + SORTING
+  // All three stage filters + text search + price sort
+  // runs entirely in memory on the full loaded array
   // ─────────────────────────────────────────────────────
   const applyFilters = useCallback((pool) => {
     let result = pool;
 
-    // Stage 1
+    // Stage 1: platform
     if (selPlatform && selPlatform.slug !== 'everything') {
       const allowed = platformServiceMap[selPlatform.id] || new Set();
       result = result.filter(s => allowed.has(s.id));
     }
-    // Stage 2
+    // Stage 2: service type
     if (selServiceType && selServiceType.slug !== 'all') {
       const allowed = serviceTypeMap[selServiceType.id] || new Set();
       result = result.filter(s => allowed.has(s.id));
     }
-    // Stage 3
+    // Stage 3: filter type
     if (selFilterType && selFilterType.slug !== 'all') {
       const allowed = filterTypeMap[selFilterType.id] || new Set();
       result = result.filter(s => allowed.has(s.id));
     }
-    // Text search — name, platform, description, or numeric service ID
+    // Text search: name, platform, description, service ID
     if (search.trim()) {
       const q = search.toLowerCase().trim();
       result = result.filter(s =>
@@ -238,22 +263,26 @@ export default function Marketplace({ user, onNav }) {
   }, [selPlatform, selServiceType, selFilterType, search, priceSort,
       platformServiceMap, serviceTypeMap, filterTypeMap, customPrices]);
 
+  // Split services into featured and non-featured pools
   const featuredServices    = services.filter(s =>  s.is_featured);
   const nonFeaturedServices = services.filter(s => !s.is_featured);
 
-  // Featured tab: filters on featured pool
+  // Apply filters to each pool
+  // Featured tab uses featuredServices pool
+  // Live tab uses nonFeaturedServices pool — featured NEVER appear in Live tab
   const filteredFeatured = applyFilters(featuredServices);
-  // Live tab: filters on non-featured pool only (featured are in their own tab)
   const filteredLive     = applyFilters(nonFeaturedServices);
 
-  const anyFilterActive = !!(selPlatform || selServiceType || selFilterType || search.trim() || priceSort);
+  const anyFilterActive = !!(
+    selPlatform || selServiceType || selFilterType || search.trim() || priceSort
+  );
 
-  // Slice for infinite scroll
+  // Slice filteredLive for infinite scroll display
   const visibleLive = filteredLive.slice(0, visibleCount);
   const hasMoreLive = visibleCount < filteredLive.length;
 
   // ─────────────────────────────────────────────────────
-  // Order placement (identical to original)
+  // Order placement
   // ─────────────────────────────────────────────────────
   const cost = selected && qty
     ? (parseFloat(qty) / 1000 * effectivePrice(selected)).toFixed(4)
@@ -347,7 +376,8 @@ export default function Marketplace({ user, onNav }) {
   };
 
   // ─────────────────────────────────────────────────────
-  // Filter Pill — used in stage 1 and stage 2 (box style)
+  // FilterPill — box-style pill used for Select Platform
+  // and Select Service rows
   // ─────────────────────────────────────────────────────
   const FilterPill = ({ item, isSelected, onClick, color }) => (
     <div
@@ -370,7 +400,8 @@ export default function Marketplace({ user, onNav }) {
   );
 
   // ─────────────────────────────────────────────────────
-  // Service Card — compact style matching original Image 2
+  // ServiceCard — compact 2-column card matching Image 3
+  // Small font, 2-line description clamp, compact spacing
   // ─────────────────────────────────────────────────────
   const ServiceCard = ({ s }) => {
     const price     = effectivePrice(s);
@@ -378,53 +409,91 @@ export default function Marketplace({ user, onNav }) {
     return (
       <div
         className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
-        onClick={() => { setSelected(s); setLink(''); setQty(s.min_qty); setOrderError(''); }}>
+        onClick={() => {
+          setSelected(s);
+          setLink('');
+          setQty(s.min_qty);
+          setOrderError('');
+        }}>
+        {/* FEATURED badge — top right ribbon */}
         {s.is_featured && (
           <div style={{
-            position: 'absolute', top: '-1px', right: '10px',
+            position: 'absolute', top: 0, right: 0,
             background: 'linear-gradient(135deg,var(--gold2),var(--gold))',
-            color: '#000', fontSize: '8px', fontWeight: 800, padding: '3px 8px',
-            borderRadius: '0 0 6px 6px', letterSpacing: '1px', fontFamily: 'var(--fd)',
+            color: '#000', fontSize: '7px', fontWeight: 800, padding: '3px 7px',
+            borderRadius: '0 8px 0 8px', letterSpacing: '0.5px',
           }}>⭐ FEATURED</div>
         )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-          <span style={{ fontSize: '20px' }}>{ic(s.platform)}</span>
+        {/* Platform icon + badge row */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'flex-start', marginBottom: '6px',
+        }}>
+          <span style={{ fontSize: '18px' }}>{ic(s.platform)}</span>
           <span style={{
-            fontSize: '9px', padding: '2px 7px', borderRadius: '10px', fontWeight: 700,
+            fontSize: '8px', padding: '2px 6px', borderRadius: '8px', fontWeight: 700,
             background: `${cl(s.platform)}18`, color: cl(s.platform),
-            border: `1px solid ${cl(s.platform)}30`, textTransform: 'uppercase', letterSpacing: '1px',
+            border: `1px solid ${cl(s.platform)}28`,
+            textTransform: 'uppercase', letterSpacing: '0.5px',
           }}>{s.platform}</span>
         </div>
-        <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '3px', color: 'var(--text)', lineHeight: 1.4 }}>
+        {/* Service name */}
+        <div style={{
+          fontWeight: 700, fontSize: '11px', color: 'var(--text)',
+          lineHeight: 1.35, marginBottom: '3px',
+          display: '-webkit-box', WebkitLineClamp: 3,
+          WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}>
           {s.name}
         </div>
+        {/* Description — 2 lines max */}
         {s.description && (
           <div style={{
-            fontSize: '10px', color: 'var(--text3)', marginBottom: '8px', lineHeight: 1.4,
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            fontSize: '9px', color: 'var(--text3)', lineHeight: 1.35, marginBottom: '6px',
+            display: '-webkit-box', WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical', overflow: 'hidden',
           }}>
             {s.description}
           </div>
         )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+        {/* Price + min/max row */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'flex-end', marginTop: 'auto',
+        }}>
           <div>
-            <div style={{ fontFamily: 'var(--fm)', fontSize: '14px', fontWeight: 700, color: 'var(--gold)' }}>
+            <div style={{
+              fontFamily: 'var(--fm)', fontSize: '13px',
+              fontWeight: 700, color: 'var(--gold)',
+            }}>
               {format(price)}
             </div>
-            <div style={{ fontSize: '9px', color: 'var(--text3)' }}>per 1,000</div>
+            <div style={{ fontSize: '8px', color: 'var(--text3)' }}>per 1,000</div>
             {hasCustom && (
-              <div style={{ fontSize: '8px', color: 'var(--neon)', letterSpacing: '0.5px' }}>✦ Special</div>
+              <div style={{ fontSize: '7px', color: 'var(--neon)' }}>✦ Special</div>
             )}
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Min: {(s.min_qty || 0).toLocaleString()}</div>
-            <div style={{ fontSize: '9px', color: 'var(--text3)' }}>Max: {(s.max_qty || 0).toLocaleString()}</div>
+            <div style={{ fontSize: '8px', color: 'var(--text3)' }}>
+              Min: {(s.min_qty || 0).toLocaleString()}
+            </div>
+            <div style={{ fontSize: '8px', color: 'var(--text3)' }}>
+              Max: {(s.max_qty || 0).toLocaleString()}
+            </div>
           </div>
         </div>
+        {/* Auto badge */}
         {s.provider_api_url && (
-          <div style={{ marginTop: '5px', fontSize: '9px', color: 'var(--green)', letterSpacing: '1px' }}>⚡ AUTO</div>
+          <div style={{ marginTop: '4px', fontSize: '8px', color: 'var(--green)' }}>
+            ⚡ AUTO
+          </div>
         )}
-        <button className="btn bp bsm bw" style={{ marginTop: '10px' }}>Order Now →</button>
+        {/* Order button */}
+        <button
+          className="btn bp bsm bw"
+          style={{ marginTop: '8px', fontSize: '10px', padding: '6px' }}>
+          Order Now →
+        </button>
       </div>
     );
   };
@@ -435,32 +504,38 @@ export default function Marketplace({ user, onNav }) {
   return (
     <div>
 
-      {/* ── TOP TABS: Featured | Live Services ── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* TOP TABS — Featured | Live Services               */}
+      {/* ════════════════════════════════════════════════ */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+        {/* FEATURED tab */}
         <div
           onClick={() => setActiveTab('featured')}
           style={{
             flex: 1, padding: '10px 8px', borderRadius: '10px', textAlign: 'center',
-            background: activeTab === 'featured'
-              ? 'linear-gradient(135deg,rgba(212,175,55,.18),rgba(255,215,0,.08))'
-              : 'rgba(0,0,0,.2)',
-            border: `1.5px solid ${activeTab === 'featured' ? 'rgba(255,215,0,.5)' : 'var(--br)'}`,
             cursor: 'pointer', transition: 'all .15s',
+            background: activeTab === 'featured'
+              ? 'linear-gradient(135deg,rgba(212,175,55,.2),rgba(255,215,0,.08))'
+              : 'rgba(0,0,0,.2)',
+            border: `1.5px solid ${activeTab === 'featured'
+              ? 'rgba(255,215,0,.55)' : 'var(--br)'}`,
             fontWeight: 800, fontSize: '11px',
             color: activeTab === 'featured' ? 'var(--gold)' : 'var(--text3)',
             fontFamily: 'var(--fd)', letterSpacing: '1px',
           }}>
           ⭐ FEATURED
         </div>
+        {/* LIVE SERVICES tab */}
         <div
           onClick={() => setActiveTab('live')}
           style={{
             flex: 2, padding: '10px 8px', borderRadius: '10px', textAlign: 'center',
+            cursor: 'pointer', transition: 'all .15s',
             background: activeTab === 'live'
               ? 'linear-gradient(135deg,rgba(0,212,255,.15),rgba(123,47,255,.1))'
               : 'rgba(0,0,0,.2)',
-            border: `1.5px solid ${activeTab === 'live' ? 'rgba(0,212,255,.4)' : 'var(--br)'}`,
-            cursor: 'pointer', transition: 'all .15s',
+            border: `1.5px solid ${activeTab === 'live'
+              ? 'rgba(0,212,255,.45)' : 'var(--br)'}`,
             fontWeight: 800, fontSize: '11px', color: 'var(--neon)',
             fontFamily: 'var(--fd)', letterSpacing: '1px',
           }}>
@@ -468,7 +543,10 @@ export default function Marketplace({ user, onNav }) {
         </div>
       </div>
 
-      {/* ── SEARCH BAR — above all filters ── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* SEARCH BAR — above all filters                   */}
+      {/* Searches by name, platform, description, ID      */}
+      {/* ════════════════════════════════════════════════ */}
       <div style={{ marginBottom: '12px' }}>
         <input
           className="srch-inp"
@@ -479,15 +557,19 @@ export default function Marketplace({ user, onNav }) {
         />
       </div>
 
-      {/* ── STAGE 1: SELECT PLATFORM ── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* STAGE 1: SELECT PLATFORM                         */}
+      {/* ════════════════════════════════════════════════ */}
       {!loading && filterPlatforms.length > 0 && (
         <div style={{ marginBottom: '12px' }}>
-          <div style={{ fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
-            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700 }}>
+          <div style={{
+            fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
+            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
+          }}>
             SELECT PLATFORM
           </div>
           <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
-            {/* Everything pill */}
+            {/* Everything — selects no platform filter */}
             <FilterPill
               item={{ icon: '🌐', name: 'Everything' }}
               isSelected={!selPlatform || selPlatform?.slug === 'everything'}
@@ -516,15 +598,19 @@ export default function Marketplace({ user, onNav }) {
         </div>
       )}
 
-      {/* ── STAGE 2: SELECT SERVICE TYPE ── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* STAGE 2: SELECT SERVICE TYPE                     */}
+      {/* ════════════════════════════════════════════════ */}
       {!loading && filterServiceTypes.length > 0 && (
         <div style={{ marginBottom: '12px' }}>
-          <div style={{ fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
-            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700 }}>
+          <div style={{
+            fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
+            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
+          }}>
             SELECT SERVICE
           </div>
           <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
-            {/* All pill */}
+            {/* All — selects no service type filter */}
             <FilterPill
               item={{ icon: '💎', name: 'All' }}
               isSelected={!selServiceType || selServiceType?.slug === 'all'}
@@ -551,14 +637,22 @@ export default function Marketplace({ user, onNav }) {
         </div>
       )}
 
-      {/* ── STAGE 3: FILTER BY TYPE ── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* STAGE 3: FILTER BY TYPE                          */}
+      {/* Pill-style (rounded) — matches original design   */}
+      {/* ════════════════════════════════════════════════ */}
       {!loading && filterTypes.length > 0 && (
         <div style={{ marginBottom: '12px' }}>
-          <div style={{ fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
-            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700 }}>
+          <div style={{
+            fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
+            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
+          }}>
             FILTER BY TYPE
           </div>
-          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px', flexWrap: 'wrap' }}>
+          <div style={{
+            display: 'flex', gap: '6px',
+            overflowX: 'auto', paddingBottom: '4px', flexWrap: 'wrap',
+          }}>
             {/* All pill */}
             <div
               onClick={() => setSelFilterType(null)}
@@ -573,31 +667,42 @@ export default function Marketplace({ user, onNav }) {
               }}>
               💎 All
             </div>
-            {filterTypes.filter(ft => ft.slug !== 'all').map(ft => (
-              <div key={ft.id}
-                onClick={() => {
-                  setSelFilterType(selFilterType?.id === ft.id ? null : ft);
-                  setActiveTab('live');
-                }}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '5px',
-                  padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
-                  background: selFilterType?.id === ft.id ? 'rgba(255,215,0,.1)' : 'rgba(0,0,0,.2)',
-                  border: `1.5px solid ${selFilterType?.id === ft.id ? '#ffd700' : 'var(--br)'}`,
-                  fontSize: '10px', fontWeight: 700,
-                  color: selFilterType?.id === ft.id ? 'var(--gold)' : 'var(--text3)',
-                  transition: 'all .15s', userSelect: 'none', flexShrink: 0,
-                }}>
-                {ft.icon} {ft.name}
-              </div>
-            ))}
+            {filterTypes.filter(ft => ft.slug !== 'all').map(ft => {
+              const isOn = selFilterType?.id === ft.id;
+              return (
+                <div key={ft.id}
+                  onClick={() => {
+                    setSelFilterType(isOn ? null : ft);
+                    setActiveTab('live');
+                  }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                    background: isOn ? 'rgba(255,215,0,.1)' : 'rgba(0,0,0,.2)',
+                    border: `1.5px solid ${isOn ? '#ffd700' : 'var(--br)'}`,
+                    fontSize: '10px', fontWeight: 700,
+                    color: isOn ? 'var(--gold)' : 'var(--text3)',
+                    transition: 'all .15s', userSelect: 'none', flexShrink: 0,
+                  }}>
+                  {ft.icon} {ft.name}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* ── PRICE SORT + result count row ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>💰 Price:</span>
+      {/* ════════════════════════════════════════════════ */}
+      {/* PRICE SORT ROW                                   */}
+      {/* Default | Low → High | High → Low                */}
+      {/* ════════════════════════════════════════════════ */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '6px',
+        marginBottom: '12px', flexWrap: 'wrap',
+      }}>
+        <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>
+          💰 Price:
+        </span>
         {[
           { val: '',     label: 'Default'    },
           { val: 'low',  label: 'Low → High' },
@@ -605,11 +710,12 @@ export default function Marketplace({ user, onNav }) {
         ].map(opt => {
           const isOn = priceSort === opt.val;
           return (
-            <div key={opt.val}
+            <div
+              key={opt.val}
               onClick={() => setPriceSort(opt.val)}
               style={{
-                padding: '4px 10px', borderRadius: '16px', cursor: 'pointer', fontSize: '10px',
-                fontWeight: isOn ? 800 : 600,
+                padding: '5px 11px', borderRadius: '16px', cursor: 'pointer',
+                fontSize: '10px', fontWeight: isOn ? 800 : 600,
                 background: isOn ? 'rgba(0,212,255,.12)' : 'rgba(0,0,0,.2)',
                 border: `1.5px solid ${isOn ? 'var(--neon)' : 'var(--br)'}`,
                 color: isOn ? 'var(--neon)' : 'var(--text3)',
@@ -619,7 +725,7 @@ export default function Marketplace({ user, onNav }) {
             </div>
           );
         })}
-        {/* Result count + Clear */}
+        {/* Result count + clear button — only when a filter is active */}
         {anyFilterActive && (
           <>
             <span style={{ fontSize: '10px', color: 'var(--text3)', marginLeft: 'auto' }}>
@@ -628,7 +734,8 @@ export default function Marketplace({ user, onNav }) {
               {selServiceType && ` · ${selServiceType.name}`}
               {selFilterType  && ` · ${selFilterType.name}`}
             </span>
-            <button className="btn bgh bsm"
+            <button
+              className="btn bgh bsm"
               onClick={() => {
                 setSelPlatform(null);
                 setSelServiceType(null);
@@ -642,9 +749,9 @@ export default function Marketplace({ user, onNav }) {
         )}
       </div>
 
-      {/* ─────────────────────────────────────────────── */}
-      {/* TAB CONTENT                                      */}
-      {/* ─────────────────────────────────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* LOADING STATE                                     */}
+      {/* ════════════════════════════════════════════════ */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>
           <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>
@@ -652,7 +759,11 @@ export default function Marketplace({ user, onNav }) {
         </div>
       ) : (
         <>
-          {/* ── FEATURED TAB ── */}
+          {/* ════════════════════════════════════════════ */}
+          {/* FEATURED TAB CONTENT                         */}
+          {/* Shows only is_featured=true services         */}
+          {/* Uses the same compact ServiceCard component  */}
+          {/* ════════════════════════════════════════════ */}
           {activeTab === 'featured' && (
             <>
               {filteredFeatured.length === 0 ? (
@@ -666,24 +777,20 @@ export default function Marketplace({ user, onNav }) {
                   </div>
                 </div>
               ) : (
-                <>
-                  <div className="st">⭐ Featured Services
-                    <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400,
-                      letterSpacing: '1px', marginLeft: '8px' }}>
-                      — Handpicked by admin
-                    </span>
-                  </div>
-                  <div className="mkt-grid">
-                    {filteredFeatured.map(s => <ServiceCard key={s.id} s={s} />)}
-                  </div>
-                </>
+                <div className="mkt-grid">
+                  {filteredFeatured.map(s => <ServiceCard key={s.id} s={s} />)}
+                </div>
               )}
             </>
           )}
 
-          {/* ── LIVE SERVICES TAB ── */}
-          {/* Services show immediately — no "Browse All" button needed.        */}
-          {/* Infinite scroll loads 20 at a time as user scrolls.               */}
+          {/* ════════════════════════════════════════════ */}
+          {/* LIVE SERVICES TAB CONTENT                    */}
+          {/* Shows is_featured=false services only        */}
+          {/* Infinite scroll: 20 shown, loads 20 more    */}
+          {/* as user scrolls sentinel div into view       */}
+          {/* NO Browse All button — services always show  */}
+          {/* ════════════════════════════════════════════ */}
           {activeTab === 'live' && (
             <>
               {filteredLive.length === 0 ? (
@@ -700,7 +807,9 @@ export default function Marketplace({ user, onNav }) {
                       : 'Try different filters or clear your selection'}
                   </div>
                   {anyFilterActive && (
-                    <button className="btn bgh bsm" style={{ marginTop: '12px' }}
+                    <button
+                      className="btn bgh bsm"
+                      style={{ marginTop: '12px' }}
                       onClick={() => {
                         setSelPlatform(null);
                         setSelServiceType(null);
@@ -714,21 +823,27 @@ export default function Marketplace({ user, onNav }) {
                 </div>
               ) : (
                 <>
-                  {/* Count indicator */}
+                  {/* Showing X of Y indicator */}
                   <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '10px' }}>
                     Showing {Math.min(visibleCount, filteredLive.length).toLocaleString()} of {filteredLive.length.toLocaleString()} services
                   </div>
 
-                  {/* Service cards grid */}
+                  {/* Service cards grid — only visibleLive items rendered */}
                   <div className="mkt-grid">
                     {visibleLive.map(s => <ServiceCard key={s.id} s={s} />)}
                   </div>
 
-                  {/* Infinite scroll sentinel — when this div enters viewport, load more */}
+                  {/* ── INFINITE SCROLL SENTINEL ──────────────────── */}
+                  {/* When this div scrolls into view, visibleCount    */}
+                  {/* increases by PAGE_SIZE, showing more cards       */}
                   {hasMoreLive && (
-                    <div ref={loaderRef}
-                      style={{ display: 'flex', justifyContent: 'center', alignItems: 'center',
-                        padding: '24px', gap: '10px', color: 'var(--text3)', fontSize: '12px' }}>
+                    <div
+                      ref={loaderRef}
+                      style={{
+                        display: 'flex', justifyContent: 'center',
+                        alignItems: 'center', padding: '24px',
+                        gap: '10px', color: 'var(--text3)', fontSize: '12px',
+                      }}>
                       <div style={{
                         width: '16px', height: '16px', borderRadius: '50%',
                         border: '2px solid var(--neon)', borderTopColor: 'transparent',
@@ -738,10 +853,12 @@ export default function Marketplace({ user, onNav }) {
                     </div>
                   )}
 
-                  {/* End of list indicator */}
+                  {/* All loaded indicator */}
                   {!hasMoreLive && filteredLive.length > PAGE_SIZE && (
-                    <div style={{ textAlign: 'center', padding: '16px',
-                      color: 'var(--text3)', fontSize: '11px' }}>
+                    <div style={{
+                      textAlign: 'center', padding: '16px',
+                      color: 'var(--text3)', fontSize: '11px',
+                    }}>
                       ✅ All {filteredLive.length.toLocaleString()} services loaded
                     </div>
                   )}
@@ -752,104 +869,156 @@ export default function Marketplace({ user, onNav }) {
         </>
       )}
 
-      {/* ─────────────────────────────────────────────── */}
-      {/* ORDER MODAL                                      */}
-      {/* ─────────────────────────────────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* ORDER MODAL                                       */}
+      {/* ════════════════════════════════════════════════ */}
       {selected && (
         <div className="mlay" onClick={() => setSelected(null)}>
-          <div className="mbox" onClick={e => e.stopPropagation()}
+          <div
+            className="mbox"
+            onClick={e => e.stopPropagation()}
             style={{ maxWidth: '500px', width: '100%' }}>
 
-            {/* Service header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+            {/* Header: icon, name, platform, service ID */}
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              gap: '12px', marginBottom: '14px',
+            }}>
               <span style={{ fontSize: '26px' }}>{ic(selected.platform)}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', lineHeight: 1.3 }}>
+                <div style={{
+                  fontWeight: 800, fontSize: '13px',
+                  color: 'var(--text)', lineHeight: 1.3,
+                }}>
                   {selected.name}
                 </div>
-                <div style={{ fontSize: '10px', color: cl(selected.platform),
-                  textTransform: 'uppercase', letterSpacing: '1px', marginTop: '2px' }}>
+                <div style={{
+                  fontSize: '10px', color: cl(selected.platform),
+                  textTransform: 'uppercase', letterSpacing: '1px', marginTop: '2px',
+                }}>
                   {selected.platform}
                   {selected.provider_api_url && (
-                    <span style={{ color: 'var(--green)', marginLeft: '6px' }}>⚡ Auto-delivery</span>
+                    <span style={{ color: 'var(--green)', marginLeft: '6px' }}>
+                      ⚡ Auto-delivery
+                    </span>
                   )}
                   {customPrices[selected.id] && (
-                    <span style={{ color: 'var(--neon)', marginLeft: '6px' }}>✦ Special Price</span>
+                    <span style={{ color: 'var(--neon)', marginLeft: '6px' }}>
+                      ✦ Special Price
+                    </span>
                   )}
                 </div>
                 {selected.provider_service_id && (
                   <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '2px' }}>
                     Service ID:&nbsp;
-                    <span style={{ color: 'var(--neon)', fontFamily: 'monospace',
-                      background: 'rgba(0,212,255,.08)', borderRadius: '3px', padding: '1px 5px' }}>
+                    <span style={{
+                      color: 'var(--neon)', fontFamily: 'monospace',
+                      background: 'rgba(0,212,255,.08)',
+                      borderRadius: '3px', padding: '1px 5px',
+                    }}>
                       {selected.provider_service_id}
                     </span>
                   </div>
                 )}
               </div>
-              <button onClick={() => setSelected(null)}
-                style={{ background: 'none', border: 'none', color: 'var(--text3)',
-                  cursor: 'pointer', fontSize: '22px', flexShrink: 0 }}>×</button>
+              <button
+                onClick={() => setSelected(null)}
+                style={{
+                  background: 'none', border: 'none', color: 'var(--text3)',
+                  cursor: 'pointer', fontSize: '22px', flexShrink: 0,
+                }}>×</button>
             </div>
 
-            {/* Service Description box */}
+            {/* Service Description — visible blue box */}
             {selected.description && selected.description.trim() && (
               <div style={{
                 padding: '10px 13px', borderRadius: '8px', marginBottom: '14px',
-                background: 'rgba(0,212,255,.04)', border: '1px solid rgba(0,212,255,.15)',
+                background: 'rgba(0,212,255,.05)', border: '1px solid rgba(0,212,255,.2)',
               }}>
-                <div style={{ fontSize: '9px', color: 'var(--neon)', fontWeight: 800,
-                  textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '5px' }}>
+                <div style={{
+                  fontSize: '9px', color: 'var(--neon)', fontWeight: 800,
+                  textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '6px',
+                }}>
                   📄 Service Description
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <div style={{
+                  fontSize: '12px', color: 'var(--text2)',
+                  lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
                   {selected.description}
                 </div>
               </div>
             )}
 
+            {/* Order placed success */}
             {ordered ? (
               <div style={{ textAlign: 'center', padding: '30px 0' }}>
                 <div style={{ fontSize: '40px', marginBottom: '12px' }}>✅</div>
-                <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: '15px',
-                  marginBottom: '6px' }}>Order Placed!</div>
-                <div style={{ color: 'var(--text3)', fontSize: '12px' }}>Processing automatically...</div>
+                <div style={{
+                  color: 'var(--green)', fontWeight: 700,
+                  fontSize: '15px', marginBottom: '6px',
+                }}>
+                  Order Placed!
+                </div>
+                <div style={{ color: 'var(--text3)', fontSize: '12px' }}>
+                  Processing automatically...
+                </div>
               </div>
             ) : (
               <>
+                {/* Link input */}
                 <div className="fi">
                   <label className="fl">Your Link / Username</label>
-                  <input className="inp" value={link} onChange={e => setLink(e.target.value)}
-                    placeholder="https://..." />
+                  <input
+                    className="inp"
+                    value={link}
+                    onChange={e => setLink(e.target.value)}
+                    placeholder="https://..."
+                  />
                 </div>
+                {/* Quantity input */}
                 <div className="fi">
                   <label className="fl">
                     Quantity ({(selected.min_qty || 0).toLocaleString()} – {(selected.max_qty || 0).toLocaleString()})
                   </label>
-                  <input className="inp" type="number" value={qty}
+                  <input
+                    className="inp"
+                    type="number"
+                    value={qty}
                     onChange={e => setQty(e.target.value)}
-                    min={selected.min_qty} max={selected.max_qty} />
+                    min={selected.min_qty}
+                    max={selected.max_qty}
+                  />
                 </div>
+                {/* Total cost display */}
                 <div style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   marginBottom: '14px', padding: '10px 13px', borderRadius: '8px',
                   background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)',
                 }}>
                   <span style={{ fontSize: '11px', color: 'var(--text2)' }}>Total Cost</span>
-                  <span style={{ fontFamily: 'var(--fm)', fontSize: '18px', fontWeight: 700,
-                    color: 'var(--gold)' }}>
+                  <span style={{
+                    fontFamily: 'var(--fm)', fontSize: '18px',
+                    fontWeight: 700, color: 'var(--gold)',
+                  }}>
                     {format(parseFloat(cost))}
                   </span>
                 </div>
+                {/* Error message */}
                 {orderError && (
-                  <div style={{ background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)',
+                  <div style={{
+                    background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)',
                     borderRadius: '7px', padding: '10px', color: '#ff6b6b',
-                    fontSize: '12px', marginBottom: '12px' }}>
+                    fontSize: '12px', marginBottom: '12px',
+                  }}>
                     {orderError}
                   </div>
                 )}
-                <button className="btn bp blg bw" onClick={placeOrder} disabled={ordering}>
+                {/* Place order button */}
+                <button
+                  className="btn bp blg bw"
+                  onClick={placeOrder}
+                  disabled={ordering}>
                   {ordering ? '⏳ Processing...' : `⚡ Place Order — ${format(parseFloat(cost))}`}
                 </button>
               </>
