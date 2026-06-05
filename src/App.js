@@ -1,41 +1,82 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import './style.css';
 import { supabase } from './supabase';
-import Landing from './Landing';
-import Auth from './Auth';
-import Sidebar from './Sidebar';
-import Topbar from './Topbar';
-import BuyerDashboard from './BuyerDashboard';
-import Marketplace from './Marketplace';
-import Deposit from './Deposit';
-import Orders from './Orders';
-import Transactions from './Transactions';
-import Profile from './Profile';
-import Referral from './Referral';
-import Tasks from './Tasks';
-import PanelApi from './PanelApi';
-import AdminDashboard from './AdminDashboard';
-import AdminDeposits from './AdminDeposits';
-import AdminUsers from './AdminUsers';
-import AdminSettings from './AdminSettings';
-import AdminDisputes from './AdminDisputes';
-import AdminApiImport from './AdminApiImport';
-import AdminWithdrawals from './AdminWithdrawals';
-import AdminResellers from './AdminResellers';
-import AdminTasks from './AdminTasks';
-import AdminReferral from './AdminReferral';
-import AdminSupport from './AdminSupport';
-import AdminCurrencies from './AdminCurrencies';
-import AdminMassEmail from './AdminMassEmail';
-import AdminOrders from './AdminOrders';
-import AdminServices from './AdminServices';
-import AdminManageFilters from './AdminManageFilters';
-import ResellerDashboard from './ResellerDashboard';
-import ResellerServices from './ResellerServices';
-import ResellerEarnings from './ResellerEarnings';
-import SupportTicket from './SupportTicket';
+
+// ─── Always-loaded (tiny shell components, needed on every screen) ────────────
+import Landing        from './Landing';
+import Auth           from './Auth';
+import Sidebar        from './Sidebar';
+import Topbar         from './Topbar';
 import CurrencySwitcher from './CurrencySwitcher';
 
+// ─── Lazy-loaded page components (only downloaded when the user visits them) ──
+//     Each of these becomes its own separate JS chunk. The browser only fetches
+//     a chunk the moment the user navigates to that page for the first time.
+const BuyerDashboard    = lazy(() => import('./BuyerDashboard'));
+const Marketplace       = lazy(() => import('./Marketplace'));
+const Deposit           = lazy(() => import('./Deposit'));
+const Orders            = lazy(() => import('./Orders'));
+const Transactions      = lazy(() => import('./Transactions'));
+const Profile           = lazy(() => import('./Profile'));
+const Referral          = lazy(() => import('./Referral'));
+const Tasks             = lazy(() => import('./Tasks'));
+const PanelApi          = lazy(() => import('./PanelApi'));
+const SupportTicket     = lazy(() => import('./SupportTicket'));
+
+const AdminDashboard    = lazy(() => import('./AdminDashboard'));
+const AdminOrders       = lazy(() => import('./AdminOrders'));
+const AdminServices     = lazy(() => import('./AdminServices'));
+const AdminManageFilters= lazy(() => import('./AdminManageFilters'));
+const AdminDeposits     = lazy(() => import('./AdminDeposits'));
+const AdminUsers        = lazy(() => import('./AdminUsers'));
+const AdminSettings     = lazy(() => import('./AdminSettings'));
+const AdminDisputes     = lazy(() => import('./AdminDisputes'));
+const AdminApiImport    = lazy(() => import('./AdminApiImport'));
+const AdminWithdrawals  = lazy(() => import('./AdminWithdrawals'));
+const AdminResellers    = lazy(() => import('./AdminResellers'));
+const AdminTasks        = lazy(() => import('./AdminTasks'));
+const AdminReferral     = lazy(() => import('./AdminReferral'));
+const AdminSupport      = lazy(() => import('./AdminSupport'));
+const AdminCurrencies   = lazy(() => import('./AdminCurrencies'));
+const AdminMassEmail    = lazy(() => import('./AdminMassEmail'));
+const AdminCreateReseller = lazy(() => import('./AdminCreateReseller'));
+
+const ResellerDashboard = lazy(() => import('./ResellerDashboard'));
+const ResellerServices  = lazy(() => import('./ResellerServices'));
+const ResellerEarnings  = lazy(() => import('./ResellerEarnings'));
+
+// ─── Page-transition loading spinner ─────────────────────────────────────────
+//     Shown for ~100-300ms while the new page chunk is downloading.
+function PageLoader() {
+  return (
+    <div style={{
+      display:        'flex',
+      alignItems:     'center',
+      justifyContent: 'center',
+      minHeight:      '50vh',
+      flexDirection:  'column',
+      gap:            '14px',
+    }}>
+      <div style={{
+        width:           '32px',
+        height:          '32px',
+        border:          '3px solid var(--border)',
+        borderTopColor:  'var(--neon)',
+        borderRadius:    '50%',
+        animation:       'spin 0.7s linear infinite',
+      }} />
+      <div style={{
+        fontSize:      '11px',
+        color:         'var(--text3)',
+        letterSpacing: '2px',
+      }}>
+        LOADING…
+      </div>
+    </div>
+  );
+}
+
+// ─── Data ─────────────────────────────────────────────────────────────────────
 const pageTitles = {
   dashboard:    'Dashboard',    marketplace:   'Marketplace',
   orders:       'My Orders',    deposit:       'Add Funds',
@@ -75,6 +116,7 @@ const adminNav = [
   { ic: '👤', lb: 'Profile',  id: 'profile'      },
 ];
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 // FIX #31: capped loop replaces the while(true) that was here — can never hang
 async function generateUniqueUsername(baseName) {
   const base = (baseName || 'user').toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
@@ -88,6 +130,7 @@ async function generateUniqueUsername(baseName) {
   return base + '_' + crypto.randomUUID().replace(/-/g, '').slice(0, 6);
 }
 
+// ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen,       setScreen]       = useState('loading');
   const [authTab,      setAuthTab]      = useState('login');
@@ -196,6 +239,7 @@ export default function App() {
     document.body.className = next ? '' : 'light';
   };
 
+  // ─── Screens that show before the user is logged in ─────────────────────
   if (screen === 'loading') {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: '16px' }}>
@@ -216,6 +260,10 @@ export default function App() {
     : user.role === 'reseller' ? resellerNav
     : buyerNav;
 
+  // ─── Page router ──────────────────────────────────────────────────────────
+  //     Every branch returns a lazy component.  The <Suspense> wrapper below
+  //     shows <PageLoader> while the chunk is downloading (typically < 300ms
+  //     on broadband; first visit only — the browser caches the chunk after that).
   const renderPage = () => {
     if (user.role === 'buyer') {
       if (page === 'dashboard')    return <BuyerDashboard user={user} onNav={navigate} />;
@@ -231,7 +279,7 @@ export default function App() {
     }
 
     if (user.role === 'admin') {
-      if (page === 'dashboard')    return <AdminDashboard  user={user} onNav={navigate} />;
+      if (page === 'dashboard')    return <AdminDashboard   user={user} onNav={navigate} />;
       if (page === 'adminorders')  return <AdminOrders />;
       if (page === 'adminservices')return <AdminServices />;
       if (page === 'adminfilters') return <AdminManageFilters />;
@@ -247,6 +295,7 @@ export default function App() {
       if (page === 'support')      return <AdminSupport />;
       if (page === 'currencies')   return <AdminCurrencies />;
       if (page === 'massemail')    return <AdminMassEmail />;
+      if (page === 'createreseller') return <AdminCreateReseller />;
       if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
     }
 
@@ -289,7 +338,13 @@ export default function App() {
           setSbOpen={setSbOpen}
         />
         <div className="page-content">
-          {renderPage()}
+          {/*
+            Suspense catches the lazy load and shows <PageLoader> until the
+            chunk arrives. fallback swaps out automatically — you do nothing.
+          */}
+          <Suspense fallback={<PageLoader />}>
+            {renderPage()}
+          </Suspense>
         </div>
       </main>
       <nav className="mobnav">
