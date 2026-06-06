@@ -278,7 +278,6 @@ export default function Marketplace({ user, onNav }) {
     }
 
     return result;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selPlatform, selServiceType, selFilterType, search, priceSort,
       platformServiceMap, serviceTypeMap, filterTypeMap, customPrices]);
 
