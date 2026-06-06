@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import './style.css';
 import { supabase } from './supabase';
 
-// ─── Always-loaded (tiny shell components, needed on every screen) ────────────
+/// ─── Always-loaded (tiny shell components, needed on every screen) ────────────
 import Landing        from './Landing';
 import Auth           from './Auth';
 import Sidebar        from './Sidebar';
