@@ -22,9 +22,23 @@ const platformColors = {
 };
 
 // ─────────────────────────────────────────────────────────
-// Infinite scroll: show 20 cards, load 20 more on scroll
+// Infinite scroll page size
 // ─────────────────────────────────────────────────────────
 const PAGE_SIZE = 20;
+
+// ─────────────────────────────────────────────────────────
+// Helper: convert hex color to "r,g,b" string for rgba()
+// ─────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+  if (!hex || !hex.startsWith('#')) return null;
+  const h = hex.replace('#', '');
+  if (h.length !== 6) return null;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+  return `${r},${g},${b}`;
+}
 
 export default function Marketplace({ user, onNav }) {
   const { format } = useCurrency();
@@ -51,22 +65,21 @@ export default function Marketplace({ user, onNav }) {
   const [selServiceType, setSelServiceType] = useState(null);
   const [selFilterType,  setSelFilterType]  = useState(null);
 
-  // ── Price sort: '' = default, 'low' = low→high, 'high' = high→low
+  // ── Price sort ────────────────────────────────────────
   const [priceSort, setPriceSort] = useState('');
 
   // ── Search text ───────────────────────────────────────
   const [search, setSearch] = useState('');
 
-  // ── Infinite scroll ───────────────────────────────────
-  // visibleCount = how many Live services are shown at once
-  // Starts at PAGE_SIZE (20), grows by PAGE_SIZE each time
-  // user scrolls the bottom sentinel div into view
+  // ── Infinite scroll for LIVE tab ─────────────────────
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loaderRef = useRef(null);
 
+  // ── Infinite scroll for FEATURED tab ─────────────────
+  const [featuredVisibleCount, setFeaturedVisibleCount] = useState(PAGE_SIZE);
+  const featuredLoaderRef = useRef(null);
+
   // ── Active top tab ────────────────────────────────────
-  // 'featured' = show featured services tab
-  // 'live'     = show live services tab (with infinite scroll)
   const [activeTab, setActiveTab] = useState('featured');
 
   // ── Order modal state ─────────────────────────────────
@@ -83,10 +96,7 @@ export default function Marketplace({ user, onNav }) {
   useEffect(() => { loadEverything(); }, []);
 
   // ─────────────────────────────────────────────────────
-  // IntersectionObserver for infinite scroll
-  // Watches the sentinel div at the bottom of the live list.
-  // When sentinel enters viewport → add PAGE_SIZE more visible items.
-  // Re-runs when loading finishes (so sentinel ref is attached).
+  // IntersectionObserver for LIVE infinite scroll
   // ─────────────────────────────────────────────────────
   useEffect(() => {
     const sentinel = loaderRef.current;
@@ -103,19 +113,36 @@ export default function Marketplace({ user, onNav }) {
     return () => observer.disconnect();
   }, [loading, activeTab]);
 
-  // Reset visible count when filters/search/tab changes
+  // ─────────────────────────────────────────────────────
+  // IntersectionObserver for FEATURED infinite scroll
+  // ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const sentinel = featuredLoaderRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setFeaturedVisibleCount(prev => prev + PAGE_SIZE);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loading, activeTab]);
+
+  // Reset visible counts when filters/search/tab changes
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
+    setFeaturedVisibleCount(PAGE_SIZE);
   }, [selPlatform, selServiceType, selFilterType, priceSort, search, activeTab]);
 
   // ─────────────────────────────────────────────────────
-  // loadEverything — fetches ALL services + all filter data
-  // Uses while(true) batch loop to get past Supabase 1000 row limit
+  // loadEverything
   // ─────────────────────────────────────────────────────
   const loadEverything = async () => {
     setLoading(true);
     try {
-      // Load ALL services in batches of 1000 until none left
       const BATCH = 1000;
       let allSvc  = [];
       let from    = 0;
@@ -135,7 +162,6 @@ export default function Marketplace({ user, onNav }) {
       }
       setServices(allSvc);
 
-      // Stage 1: platform filters
       const { data: plats } = await supabase
         .from('filter_platforms')
         .select('*')
@@ -154,7 +180,6 @@ export default function Marketplace({ user, onNav }) {
       });
       setPlatformServiceMap(pm);
 
-      // Stage 2: service type filters
       const { data: svcTypes } = await supabase
         .from('filter_service_types')
         .select('*')
@@ -173,7 +198,6 @@ export default function Marketplace({ user, onNav }) {
       });
       setServiceTypeMap(stm);
 
-      // Stage 3: filter types
       const { data: ftypes } = await supabase
         .from('filter_types')
         .select('*')
@@ -192,7 +216,6 @@ export default function Marketplace({ user, onNav }) {
       });
       setFilterTypeMap(ftm);
 
-      // Custom prices
       const { data: prices } = await supabase
         .from('service_custom_prices')
         .select('*');
@@ -207,8 +230,7 @@ export default function Marketplace({ user, onNav }) {
   };
 
   // ─────────────────────────────────────────────────────
-  // Effective price for a service:
-  // admin custom price takes priority over default price_per_1k
+  // Effective price
   // ─────────────────────────────────────────────────────
   const effectivePrice = (s) => {
     if (customPrices[s.id] != null) return parseFloat(customPrices[s.id]);
@@ -219,29 +241,86 @@ export default function Marketplace({ user, onNav }) {
   const cl = (p) => platformColors[(p || '').toLowerCase()] || '#7b2fff';
 
   // ─────────────────────────────────────────────────────
+  // DERIVED: relevant service types for selected platform
+  // A service type is relevant if it shares at least one
+  // service with the currently selected platform.
+  // Admin controls this by linking services to both the
+  // platform filter AND the service type filter.
+  // ─────────────────────────────────────────────────────
+  const relevantServiceTypes = React.useMemo(() => {
+    if (!selPlatform || selPlatform.slug === 'everything') {
+      return filterServiceTypes;
+    }
+    const platformIds = platformServiceMap[selPlatform.id] || new Set();
+    if (platformIds.size === 0) return [];
+
+    return filterServiceTypes.filter(st => {
+      if (st.slug === 'all') return true;
+      const stIds = serviceTypeMap[st.id] || new Set();
+      for (const id of stIds) {
+        if (platformIds.has(id)) return true;
+      }
+      return false;
+    });
+  }, [selPlatform, filterServiceTypes, platformServiceMap, serviceTypeMap]);
+
+  // ─────────────────────────────────────────────────────
+  // DERIVED: relevant filter types for selected platform
+  // + service type combo.
+  // A filter type is relevant if it shares at least one
+  // service with the current filtered service pool.
+  // ─────────────────────────────────────────────────────
+  const relevantFilterTypes = React.useMemo(() => {
+    let poolIds = null; // null means "all services"
+
+    if (selPlatform && selPlatform.slug !== 'everything') {
+      poolIds = platformServiceMap[selPlatform.id] || new Set();
+    }
+
+    if (selServiceType && selServiceType.slug !== 'all') {
+      const stIds = serviceTypeMap[selServiceType.id] || new Set();
+      if (poolIds === null) {
+        poolIds = stIds;
+      } else {
+        const intersected = new Set();
+        for (const id of stIds) {
+          if (poolIds.has(id)) intersected.add(id);
+        }
+        poolIds = intersected;
+      }
+    }
+
+    if (poolIds === null) return filterTypes;
+    if (poolIds.size === 0) return [];
+
+    return filterTypes.filter(ft => {
+      if (ft.slug === 'all') return true;
+      const ftIds = filterTypeMap[ft.id] || new Set();
+      for (const id of ftIds) {
+        if (poolIds.has(id)) return true;
+      }
+      return false;
+    });
+  }, [selPlatform, selServiceType, filterTypes, platformServiceMap, serviceTypeMap, filterTypeMap]);
+
+  // ─────────────────────────────────────────────────────
   // FILTERING + SORTING
-  // All three stage filters + text search + price sort
-  // runs entirely in memory on the full loaded array
   // ─────────────────────────────────────────────────────
   const applyFilters = useCallback((pool) => {
     let result = pool;
 
-    // Stage 1: platform
     if (selPlatform && selPlatform.slug !== 'everything') {
       const allowed = platformServiceMap[selPlatform.id] || new Set();
       result = result.filter(s => allowed.has(s.id));
     }
-    // Stage 2: service type
     if (selServiceType && selServiceType.slug !== 'all') {
       const allowed = serviceTypeMap[selServiceType.id] || new Set();
       result = result.filter(s => allowed.has(s.id));
     }
-    // Stage 3: filter type
     if (selFilterType && selFilterType.slug !== 'all') {
       const allowed = filterTypeMap[selFilterType.id] || new Set();
       result = result.filter(s => allowed.has(s.id));
     }
-    // Text search: name, platform, description, service ID
     if (search.trim()) {
       const q = search.toLowerCase().trim();
       result = result.filter(s =>
@@ -251,7 +330,6 @@ export default function Marketplace({ user, onNav }) {
         String(s.provider_service_id || '').includes(q)
       );
     }
-    // Price sort
     if (priceSort === 'low') {
       result = [...result].sort((a, b) => effectivePrice(a) - effectivePrice(b));
     } else if (priceSort === 'high') {
@@ -263,23 +341,31 @@ export default function Marketplace({ user, onNav }) {
   }, [selPlatform, selServiceType, selFilterType, search, priceSort,
       platformServiceMap, serviceTypeMap, filterTypeMap, customPrices]);
 
-  // Split services into featured and non-featured pools
+  // Split into pools
   const featuredServices    = services.filter(s =>  s.is_featured);
   const nonFeaturedServices = services.filter(s => !s.is_featured);
 
-  // Apply filters to each pool
-  // Featured tab uses featuredServices pool
-  // Live tab uses nonFeaturedServices pool — featured NEVER appear in Live tab
-  const filteredFeatured = applyFilters(featuredServices);
-  const filteredLive     = applyFilters(nonFeaturedServices);
+  // Featured tab: only text search applies (no platform/type filters)
+  const filteredFeatured = search.trim()
+    ? featuredServices.filter(s =>
+        (s.name        || '').toLowerCase().includes(search.toLowerCase().trim()) ||
+        (s.platform    || '').toLowerCase().includes(search.toLowerCase().trim()) ||
+        (s.description || '').toLowerCase().includes(search.toLowerCase().trim()) ||
+        String(s.provider_service_id || '').includes(search.toLowerCase().trim())
+      )
+    : featuredServices;
+
+  // Live tab: all filters apply
+  const filteredLive = applyFilters(nonFeaturedServices);
 
   const anyFilterActive = !!(
     selPlatform || selServiceType || selFilterType || search.trim() || priceSort
   );
 
-  // Slice filteredLive for infinite scroll display
-  const visibleLive = filteredLive.slice(0, visibleCount);
-  const hasMoreLive = visibleCount < filteredLive.length;
+  const visibleLive          = filteredLive.slice(0, visibleCount);
+  const hasMoreLive          = visibleCount < filteredLive.length;
+  const visibleFeatured      = filteredFeatured.slice(0, featuredVisibleCount);
+  const hasMoreFeatured      = featuredVisibleCount < filteredFeatured.length;
 
   // ─────────────────────────────────────────────────────
   // Order placement
@@ -376,8 +462,8 @@ export default function Marketplace({ user, onNav }) {
   };
 
   // ─────────────────────────────────────────────────────
-  // FilterPill — box-style pill used for Select Platform
-  // and Select Service rows
+  // FilterPill — box-style pill (Stage 1 / Select Platform)
+  // Scrollable horizontal row
   // ─────────────────────────────────────────────────────
   const FilterPill = ({ item, isSelected, onClick, color }) => (
     <div
@@ -400,22 +486,22 @@ export default function Marketplace({ user, onNav }) {
   );
 
   // ─────────────────────────────────────────────────────
-  // ServiceCard — compact 2-column card matching Image 3
-  // Small font, 2-line description clamp, compact spacing
+  // ServiceCard — shared card component
+  // compact=true → smaller card for Featured tab 2-col grid
   // ─────────────────────────────────────────────────────
-  const ServiceCard = ({ s }) => {
+  const ServiceCard = ({ s, compact }) => {
     const price     = effectivePrice(s);
     const hasCustom = customPrices[s.id] != null;
     return (
       <div
-        className={`mkt-card ${s.is_featured ? 'mkt-featured' : ''}`}
+        className={`mkt-card${compact ? ' mkt-card-compact' : ''} ${s.is_featured ? 'mkt-featured' : ''}`}
         onClick={() => {
           setSelected(s);
           setLink('');
           setQty(s.min_qty);
           setOrderError('');
         }}>
-        {/* FEATURED badge — top right ribbon */}
+        {/* FEATURED badge */}
         {s.is_featured && (
           <div style={{
             position: 'absolute', top: 0, right: 0,
@@ -427,11 +513,11 @@ export default function Marketplace({ user, onNav }) {
         {/* Platform icon + badge row */}
         <div style={{
           display: 'flex', justifyContent: 'space-between',
-          alignItems: 'flex-start', marginBottom: '6px',
+          alignItems: 'flex-start', marginBottom: compact ? '4px' : '6px',
         }}>
-          <span style={{ fontSize: '18px' }}>{ic(s.platform)}</span>
+          <span style={{ fontSize: compact ? '15px' : '18px' }}>{ic(s.platform)}</span>
           <span style={{
-            fontSize: '8px', padding: '2px 6px', borderRadius: '8px', fontWeight: 700,
+            fontSize: '8px', padding: '2px 5px', borderRadius: '8px', fontWeight: 700,
             background: `${cl(s.platform)}18`, color: cl(s.platform),
             border: `1px solid ${cl(s.platform)}28`,
             textTransform: 'uppercase', letterSpacing: '0.5px',
@@ -439,15 +525,15 @@ export default function Marketplace({ user, onNav }) {
         </div>
         {/* Service name */}
         <div style={{
-          fontWeight: 700, fontSize: '11px', color: 'var(--text)',
+          fontWeight: 700, fontSize: compact ? '10px' : '11px', color: 'var(--text)',
           lineHeight: 1.35, marginBottom: '3px',
-          display: '-webkit-box', WebkitLineClamp: 3,
+          display: '-webkit-box', WebkitLineClamp: compact ? 2 : 3,
           WebkitBoxOrient: 'vertical', overflow: 'hidden',
         }}>
           {s.name}
         </div>
-        {/* Description — 2 lines max */}
-        {s.description && (
+        {/* Description — hidden on compact to keep cards small */}
+        {!compact && s.description && (
           <div style={{
             fontSize: '9px', color: 'var(--text3)', lineHeight: 1.35, marginBottom: '6px',
             display: '-webkit-box', WebkitLineClamp: 2,
@@ -463,7 +549,7 @@ export default function Marketplace({ user, onNav }) {
         }}>
           <div>
             <div style={{
-              fontFamily: 'var(--fm)', fontSize: '13px',
+              fontFamily: 'var(--fm)', fontSize: compact ? '11px' : '13px',
               fontWeight: 700, color: 'var(--gold)',
             }}>
               {format(price)}
@@ -491,7 +577,7 @@ export default function Marketplace({ user, onNav }) {
         {/* Order button */}
         <button
           className="btn bp bsm bw"
-          style={{ marginTop: '8px', fontSize: '10px', padding: '6px' }}>
+          style={{ marginTop: compact ? '6px' : '8px', fontSize: '10px', padding: '5px 4px' }}>
           Order Now →
         </button>
       </div>
@@ -544,8 +630,7 @@ export default function Marketplace({ user, onNav }) {
       </div>
 
       {/* ════════════════════════════════════════════════ */}
-      {/* SEARCH BAR — above all filters                   */}
-      {/* Searches by name, platform, description, ID      */}
+      {/* SEARCH BAR — always visible                      */}
       {/* ════════════════════════════════════════════════ */}
       <div style={{ marginBottom: '12px' }}>
         <input
@@ -558,196 +643,212 @@ export default function Marketplace({ user, onNav }) {
       </div>
 
       {/* ════════════════════════════════════════════════ */}
-      {/* STAGE 1: SELECT PLATFORM                         */}
+      {/* FILTERS — LIVE TAB ONLY                          */}
+      {/* Stage 1 (platform) → Stage 2 (service type)     */}
+      {/* → Stage 3 (filter type) + price sort             */}
+      {/* Stage 2 & 3 shown only when relevant options     */}
+      {/* exist for the selected platform                  */}
       {/* ════════════════════════════════════════════════ */}
-      {!loading && filterPlatforms.length > 0 && (
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{
-            fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
-            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
-          }}>
-            SELECT PLATFORM
-          </div>
-          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
-            {/* Everything — selects no platform filter */}
-            <FilterPill
-              item={{ icon: '🌐', name: 'Everything' }}
-              isSelected={!selPlatform || selPlatform?.slug === 'everything'}
-              color="var(--neon)"
-              onClick={() => {
-                setSelPlatform(null);
-                setSelServiceType(null);
-                setSelFilterType(null);
-              }}
-            />
-            {filterPlatforms.filter(p => p.slug !== 'everything').map(p => (
-              <FilterPill
-                key={p.id}
-                item={p}
-                isSelected={selPlatform?.id === p.id}
-                color={p.color || '#00d4ff'}
-                onClick={() => {
-                  setSelPlatform(p);
-                  setSelServiceType(null);
-                  setSelFilterType(null);
-                  setActiveTab('live');
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {activeTab === 'live' && !loading && (
+        <div>
 
-      {/* ════════════════════════════════════════════════ */}
-      {/* STAGE 2: SELECT SERVICE TYPE                     */}
-      {/* ════════════════════════════════════════════════ */}
-      {!loading && filterServiceTypes.length > 0 && (
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{
-            fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
-            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
-          }}>
-            SELECT SERVICE
-          </div>
-          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
-            {/* All — selects no service type filter */}
-            <FilterPill
-              item={{ icon: '💎', name: 'All' }}
-              isSelected={!selServiceType || selServiceType?.slug === 'all'}
-              color="#7b2fff"
-              onClick={() => {
-                setSelServiceType(null);
-                setSelFilterType(null);
-              }}
-            />
-            {filterServiceTypes.filter(st => st.slug !== 'all').map(st => (
-              <FilterPill
-                key={st.id}
-                item={st}
-                isSelected={selServiceType?.id === st.id}
-                color="#7b2fff"
-                onClick={() => {
-                  setSelServiceType(st);
-                  setSelFilterType(null);
-                  setActiveTab('live');
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════════════ */}
-      {/* STAGE 3: FILTER BY TYPE                          */}
-      {/* Pill-style (rounded) — matches original design   */}
-      {/* ════════════════════════════════════════════════ */}
-      {!loading && filterTypes.length > 0 && (
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{
-            fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
-            letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
-          }}>
-            FILTER BY TYPE
-          </div>
-          <div style={{
-            display: 'flex', gap: '6px',
-            overflowX: 'auto', paddingBottom: '4px', flexWrap: 'wrap',
-          }}>
-            {/* All pill */}
-            <div
-              onClick={() => setSelFilterType(null)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '5px',
-                padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
-                background: !selFilterType ? 'rgba(0,212,255,.12)' : 'rgba(0,0,0,.2)',
-                border: `1.5px solid ${!selFilterType ? 'var(--neon)' : 'var(--br)'}`,
-                fontSize: '10px', fontWeight: 700,
-                color: !selFilterType ? 'var(--neon)' : 'var(--text3)',
-                transition: 'all .15s', userSelect: 'none', flexShrink: 0,
+          {/* ── STAGE 1: SELECT PLATFORM ────────────────── */}
+          {/* Box-style, scrollable horizontal               */}
+          {filterPlatforms.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{
+                fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
+                letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
               }}>
-              💎 All
-            </div>
-            {filterTypes.filter(ft => ft.slug !== 'all').map(ft => {
-              const isOn = selFilterType?.id === ft.id;
-              return (
-                <div key={ft.id}
+                SELECT PLATFORM
+              </div>
+              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+                {/* Everything pill */}
+                <FilterPill
+                  item={{ icon: '🌐', name: 'Everything' }}
+                  isSelected={!selPlatform || selPlatform?.slug === 'everything'}
+                  color="var(--neon)"
                   onClick={() => {
-                    setSelFilterType(isOn ? null : ft);
-                    setActiveTab('live');
+                    setSelPlatform(null);
+                    setSelServiceType(null);
+                    setSelFilterType(null);
+                  }}
+                />
+                {filterPlatforms.filter(p => p.slug !== 'everything').map(p => (
+                  <FilterPill
+                    key={p.id}
+                    item={p}
+                    isSelected={selPlatform?.id === p.id}
+                    color={p.color || '#00d4ff'}
+                    onClick={() => {
+                      setSelPlatform(p);
+                      setSelServiceType(null);
+                      setSelFilterType(null);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── STAGE 2: SELECT SERVICE TYPE ────────────── */}
+          {/* Round pill style, FIXED (wrapped, not scrollable) */}
+          {/* Shown only when relevant service types exist      */}
+          {relevantServiceTypes.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{
+                fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
+                letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
+              }}>
+                SELECT SERVICE
+              </div>
+              {/* flexWrap: wrap = fixed/non-scrollable, wraps to next line */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {/* All pill */}
+                <div
+                  onClick={() => {
+                    setSelServiceType(null);
+                    setSelFilterType(null);
                   }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: '5px',
                     padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
-                    background: isOn ? 'rgba(255,215,0,.1)' : 'rgba(0,0,0,.2)',
-                    border: `1.5px solid ${isOn ? '#ffd700' : 'var(--br)'}`,
+                    background: !selServiceType ? 'rgba(123,47,255,.12)' : 'rgba(0,0,0,.2)',
+                    border: `1.5px solid ${!selServiceType ? '#7b2fff' : 'var(--br)'}`,
+                    fontSize: '10px', fontWeight: !selServiceType ? 800 : 600,
+                    color: !selServiceType ? '#b07eff' : 'var(--text3)',
+                    transition: 'all .15s', userSelect: 'none',
+                  }}>
+                  💎 All
+                </div>
+                {relevantServiceTypes.filter(st => st.slug !== 'all').map(st => {
+                  const isOn = selServiceType?.id === st.id;
+                  return (
+                    <div
+                      key={st.id}
+                      onClick={() => {
+                        setSelServiceType(isOn ? null : st);
+                        setSelFilterType(null);
+                      }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '5px',
+                        padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                        background: isOn ? 'rgba(123,47,255,.12)' : 'rgba(0,0,0,.2)',
+                        border: `1.5px solid ${isOn ? '#7b2fff' : 'var(--br)'}`,
+                        fontSize: '10px', fontWeight: isOn ? 800 : 600,
+                        color: isOn ? '#b07eff' : 'var(--text3)',
+                        transition: 'all .15s', userSelect: 'none',
+                      }}>
+                      {st.icon} {st.name}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── STAGE 3: FILTER BY TYPE ─────────────────── */}
+          {/* Round pill style, FIXED (wrapped, not scrollable) */}
+          {/* Shown only when relevant filter types exist       */}
+          {relevantFilterTypes.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{
+                fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
+                letterSpacing: '2px', marginBottom: '7px', fontWeight: 700,
+              }}>
+                FILTER BY TYPE
+              </div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {/* All pill */}
+                <div
+                  onClick={() => setSelFilterType(null)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                    background: !selFilterType ? 'rgba(0,212,255,.12)' : 'rgba(0,0,0,.2)',
+                    border: `1.5px solid ${!selFilterType ? 'var(--neon)' : 'var(--br)'}`,
                     fontSize: '10px', fontWeight: 700,
-                    color: isOn ? 'var(--gold)' : 'var(--text3)',
+                    color: !selFilterType ? 'var(--neon)' : 'var(--text3)',
+                    transition: 'all .15s', userSelect: 'none',
+                  }}>
+                  💎 All
+                </div>
+                {relevantFilterTypes.filter(ft => ft.slug !== 'all').map(ft => {
+                  const isOn = selFilterType?.id === ft.id;
+                  return (
+                    <div key={ft.id}
+                      onClick={() => setSelFilterType(isOn ? null : ft)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '5px',
+                        padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                        background: isOn ? 'rgba(255,215,0,.1)' : 'rgba(0,0,0,.2)',
+                        border: `1.5px solid ${isOn ? '#ffd700' : 'var(--br)'}`,
+                        fontSize: '10px', fontWeight: isOn ? 800 : 600,
+                        color: isOn ? 'var(--gold)' : 'var(--text3)',
+                        transition: 'all .15s', userSelect: 'none',
+                      }}>
+                      {ft.icon} {ft.name}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── PRICE SORT + COUNT + CLEAR ───────────────── */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            marginBottom: '12px', flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>
+              💰 Price:
+            </span>
+            {[
+              { val: '',     label: 'Default'    },
+              { val: 'low',  label: 'Low → High' },
+              { val: 'high', label: 'High → Low' },
+            ].map(opt => {
+              const isOn = priceSort === opt.val;
+              return (
+                <div
+                  key={opt.val}
+                  onClick={() => setPriceSort(opt.val)}
+                  style={{
+                    padding: '5px 11px', borderRadius: '16px', cursor: 'pointer',
+                    fontSize: '10px', fontWeight: isOn ? 800 : 600,
+                    background: isOn ? 'rgba(0,212,255,.12)' : 'rgba(0,0,0,.2)',
+                    border: `1.5px solid ${isOn ? 'var(--neon)' : 'var(--br)'}`,
+                    color: isOn ? 'var(--neon)' : 'var(--text3)',
                     transition: 'all .15s', userSelect: 'none', flexShrink: 0,
                   }}>
-                  {ft.icon} {ft.name}
+                  {opt.label}
                 </div>
               );
             })}
+            {anyFilterActive && (
+              <>
+                <span style={{ fontSize: '10px', color: 'var(--text3)', marginLeft: 'auto' }}>
+                  {filteredLive.length} found
+                  {selPlatform    && ` · ${selPlatform.name}`}
+                  {selServiceType && ` · ${selServiceType.name}`}
+                  {selFilterType  && ` · ${selFilterType.name}`}
+                </span>
+                <button
+                  className="btn bgh bsm"
+                  onClick={() => {
+                    setSelPlatform(null);
+                    setSelServiceType(null);
+                    setSelFilterType(null);
+                    setSearch('');
+                    setPriceSort('');
+                  }}>
+                  Clear ×
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
-
-      {/* ════════════════════════════════════════════════ */}
-      {/* PRICE SORT ROW                                   */}
-      {/* Default | Low → High | High → Low                */}
-      {/* ════════════════════════════════════════════════ */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: '6px',
-        marginBottom: '12px', flexWrap: 'wrap',
-      }}>
-        <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>
-          💰 Price:
-        </span>
-        {[
-          { val: '',     label: 'Default'    },
-          { val: 'low',  label: 'Low → High' },
-          { val: 'high', label: 'High → Low' },
-        ].map(opt => {
-          const isOn = priceSort === opt.val;
-          return (
-            <div
-              key={opt.val}
-              onClick={() => setPriceSort(opt.val)}
-              style={{
-                padding: '5px 11px', borderRadius: '16px', cursor: 'pointer',
-                fontSize: '10px', fontWeight: isOn ? 800 : 600,
-                background: isOn ? 'rgba(0,212,255,.12)' : 'rgba(0,0,0,.2)',
-                border: `1.5px solid ${isOn ? 'var(--neon)' : 'var(--br)'}`,
-                color: isOn ? 'var(--neon)' : 'var(--text3)',
-                transition: 'all .15s', userSelect: 'none', flexShrink: 0,
-              }}>
-              {opt.label}
-            </div>
-          );
-        })}
-        {/* Result count + clear button — only when a filter is active */}
-        {anyFilterActive && (
-          <>
-            <span style={{ fontSize: '10px', color: 'var(--text3)', marginLeft: 'auto' }}>
-              {(activeTab === 'featured' ? filteredFeatured : filteredLive).length} found
-              {selPlatform    && ` · ${selPlatform.name}`}
-              {selServiceType && ` · ${selServiceType.name}`}
-              {selFilterType  && ` · ${selFilterType.name}`}
-            </span>
-            <button
-              className="btn bgh bsm"
-              onClick={() => {
-                setSelPlatform(null);
-                setSelServiceType(null);
-                setSelFilterType(null);
-                setSearch('');
-                setPriceSort('');
-              }}>
-              Clear ×
-            </button>
-          </>
-        )}
-      </div>
 
       {/* ════════════════════════════════════════════════ */}
       {/* LOADING STATE                                     */}
@@ -760,36 +861,84 @@ export default function Marketplace({ user, onNav }) {
       ) : (
         <>
           {/* ════════════════════════════════════════════ */}
-          {/* FEATURED TAB CONTENT                         */}
-          {/* Shows only is_featured=true services         */}
-          {/* Uses the same compact ServiceCard component  */}
+          {/* FEATURED TAB                                 */}
+          {/* No platform/service/type filters here        */}
+          {/* Only search bar is respected                 */}
+          {/* Compact 2-col grid + lazy load               */}
           {/* ════════════════════════════════════════════ */}
           {activeTab === 'featured' && (
             <>
+              {featuredServices.length > 0 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: '10px',
+                }}>
+                  <div style={{ fontSize: '10px', color: 'var(--text3)' }}>
+                    ⭐ <span style={{ color: 'var(--gold)', fontWeight: 700 }}>Featured Services</span>
+                    &nbsp;—&nbsp;Handpicked by admin
+                  </div>
+                  {search.trim() && (
+                    <div style={{ fontSize: '10px', color: 'var(--text3)' }}>
+                      {filteredFeatured.length} found
+                    </div>
+                  )}
+                </div>
+              )}
+
               {filteredFeatured.length === 0 ? (
                 <div className="empty">
                   <span className="empty-ic">⭐</span>
                   <div className="empty-tx">No featured services</div>
                   <div className="empty-sb">
-                    {anyFilterActive
-                      ? 'No featured services match your filters'
+                    {search.trim()
+                      ? 'No featured services match your search'
                       : 'Admin has not featured any services yet'}
                   </div>
                 </div>
               ) : (
-                <div className="mkt-grid">
-                  {filteredFeatured.map(s => <ServiceCard key={s.id} s={s} />)}
-                </div>
+                <>
+                  {/* Compact 2-col featured grid */}
+                  <div className="mkt-grid-featured">
+                    {visibleFeatured.map(s => (
+                      <ServiceCard key={s.id} s={s} compact={true} />
+                    ))}
+                  </div>
+
+                  {/* Lazy load sentinel for featured */}
+                  {hasMoreFeatured && (
+                    <div
+                      ref={featuredLoaderRef}
+                      style={{
+                        display: 'flex', justifyContent: 'center',
+                        alignItems: 'center', padding: '24px',
+                        gap: '10px', color: 'var(--text3)', fontSize: '12px',
+                      }}>
+                      <div style={{
+                        width: '16px', height: '16px', borderRadius: '50%',
+                        border: '2px solid var(--gold)', borderTopColor: 'transparent',
+                        animation: 'spin 0.7s linear infinite',
+                      }} />
+                      Loading more...
+                    </div>
+                  )}
+
+                  {!hasMoreFeatured && filteredFeatured.length > PAGE_SIZE && (
+                    <div style={{
+                      textAlign: 'center', padding: '16px',
+                      color: 'var(--text3)', fontSize: '11px',
+                    }}>
+                      ✅ All {filteredFeatured.length.toLocaleString()} featured services loaded
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
 
           {/* ════════════════════════════════════════════ */}
-          {/* LIVE SERVICES TAB CONTENT                    */}
-          {/* Shows is_featured=false services only        */}
-          {/* Infinite scroll: 20 shown, loads 20 more    */}
-          {/* as user scrolls sentinel div into view       */}
-          {/* NO Browse All button — services always show  */}
+          {/* LIVE SERVICES TAB                            */}
+          {/* All 3-stage filters + price sort apply here  */}
+          {/* Infinite scroll: 20 shown → loads more       */}
           {/* ════════════════════════════════════════════ */}
           {activeTab === 'live' && (
             <>
@@ -823,19 +972,14 @@ export default function Marketplace({ user, onNav }) {
                 </div>
               ) : (
                 <>
-                  {/* Showing X of Y indicator */}
                   <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '10px' }}>
                     Showing {Math.min(visibleCount, filteredLive.length).toLocaleString()} of {filteredLive.length.toLocaleString()} services
                   </div>
 
-                  {/* Service cards grid — only visibleLive items rendered */}
                   <div className="mkt-grid">
                     {visibleLive.map(s => <ServiceCard key={s.id} s={s} />)}
                   </div>
 
-                  {/* ── INFINITE SCROLL SENTINEL ──────────────────── */}
-                  {/* When this div scrolls into view, visibleCount    */}
-                  {/* increases by PAGE_SIZE, showing more cards       */}
                   {hasMoreLive && (
                     <div
                       ref={loaderRef}
@@ -853,7 +997,6 @@ export default function Marketplace({ user, onNav }) {
                     </div>
                   )}
 
-                  {/* All loaded indicator */}
                   {!hasMoreLive && filteredLive.length > PAGE_SIZE && (
                     <div style={{
                       textAlign: 'center', padding: '16px',
@@ -879,7 +1022,7 @@ export default function Marketplace({ user, onNav }) {
             onClick={e => e.stopPropagation()}
             style={{ maxWidth: '500px', width: '100%' }}>
 
-            {/* Header: icon, name, platform, service ID */}
+            {/* Header */}
             <div style={{
               display: 'flex', alignItems: 'center',
               gap: '12px', marginBottom: '14px',
@@ -929,7 +1072,7 @@ export default function Marketplace({ user, onNav }) {
                 }}>×</button>
             </div>
 
-            {/* Service Description — visible blue box */}
+            {/* Service Description */}
             {selected.description && selected.description.trim() && (
               <div style={{
                 padding: '10px 13px', borderRadius: '8px', marginBottom: '14px',
@@ -966,7 +1109,6 @@ export default function Marketplace({ user, onNav }) {
               </div>
             ) : (
               <>
-                {/* Link input */}
                 <div className="fi">
                   <label className="fl">Your Link / Username</label>
                   <input
@@ -976,7 +1118,6 @@ export default function Marketplace({ user, onNav }) {
                     placeholder="https://..."
                   />
                 </div>
-                {/* Quantity input */}
                 <div className="fi">
                   <label className="fl">
                     Quantity ({(selected.min_qty || 0).toLocaleString()} – {(selected.max_qty || 0).toLocaleString()})
@@ -990,7 +1131,6 @@ export default function Marketplace({ user, onNav }) {
                     max={selected.max_qty}
                   />
                 </div>
-                {/* Total cost display */}
                 <div style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   marginBottom: '14px', padding: '10px 13px', borderRadius: '8px',
@@ -1004,7 +1144,6 @@ export default function Marketplace({ user, onNav }) {
                     {format(parseFloat(cost))}
                   </span>
                 </div>
-                {/* Error message */}
                 {orderError && (
                   <div style={{
                     background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.2)',
@@ -1014,7 +1153,6 @@ export default function Marketplace({ user, onNav }) {
                     {orderError}
                   </div>
                 )}
-                {/* Place order button */}
                 <button
                   className="btn bp blg bw"
                   onClick={placeOrder}
