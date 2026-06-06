@@ -637,8 +637,9 @@ export default function AdminManageFilters() {
   const [activeFilterTypeId,  setActiveFilterTypeId]  = useState(null);
 
   // UI
-  const [loading,      setLoading]      = useState(true);
-  const [toast,        setToast]        = useState({ msg: '', type: 'success' });
+  const [loading,         setLoading]         = useState(true);
+  const [toast,           setToast]           = useState({ msg: '', type: 'success' });
+  const [migrationNeeded, setMigrationNeeded] = useState(false);
   const [searchStage1, setSearchStage1] = useState('');
   const [searchStage2, setSearchStage2] = useState('');
   const [searchStage3, setSearchStage3] = useState('');
@@ -676,7 +677,9 @@ export default function AdminManageFilters() {
 
       // ── Helper: fetch ALL rows from a junction table with no row-count limit ──
       // Supabase default cap is 1000 rows per request. This loops until done.
-      const fetchAll = async (table, selectCols = '*') => {
+      // optional=true means the table may not exist yet (new tables added by migration)
+      // — in that case we silently return [] instead of crashing the whole page.
+      const fetchAll = async (table, selectCols = '*', optional = false) => {
         const JB = 100000; // batch size — larger = fewer round trips
         let rows = [];
         let f    = 0;
@@ -684,7 +687,11 @@ export default function AdminManageFilters() {
         while (true) {
           const { data, error } = await supabase
             .from(table).select(selectCols).range(f, f + JB - 1);
-          if (error) throw error;
+          if (error) {
+            // If table doesn't exist yet and it's optional, return empty silently
+            if (optional) return [];
+            throw error;
+          }
           if (!data || data.length === 0) break;
           rows = [...rows, ...data];
           if (data.length < JB) break;
@@ -708,7 +715,8 @@ export default function AdminManageFilters() {
       setPlatformServiceMap(pm);
 
       // platform → linked service types (Stage 1 → Stage 2 direct links)
-      const platStLinks = await fetchAll('filter_platform_service_types');
+      // optional=true: table created by SQL migration — won't crash if not run yet
+      const platStLinks = await fetchAll('filter_platform_service_types', '*', true);
       const pstm = {};
       platStLinks.forEach(r => {
         if (!pstm[r.platform_id]) pstm[r.platform_id] = new Set();
@@ -731,7 +739,8 @@ export default function AdminManageFilters() {
       setServiceTypeMap(stm);
 
       // service type → linked filter types (Stage 2 → Stage 3 direct links)
-      const stFtLinks = await fetchAll('filter_service_type_filter_types');
+      // optional=true: table created by SQL migration — won't crash if not run yet
+      const stFtLinks = await fetchAll('filter_service_type_filter_types', '*', true);
       const stftm = {};
       stFtLinks.forEach(r => {
         if (!stftm[r.service_type_id]) stftm[r.service_type_id] = new Set();
@@ -760,7 +769,14 @@ export default function AdminManageFilters() {
       setCustomPrices(cp);
 
     } catch (e) {
-      showToast('Failed to load: ' + e.message, 'error');
+      // Only show error toast for real failures, not missing optional tables
+      const msg = e.message || '';
+      if (msg.includes('filter_platform_service_types') || msg.includes('filter_service_type_filter_types')) {
+        // These tables need to be created via SQL migration — show a helpful warning instead
+        setMigrationNeeded(true);
+      } else {
+        showToast('Failed to load: ' + msg, 'error');
+      }
     }
     setLoading(false);
   }, []);
@@ -982,6 +998,56 @@ export default function AdminManageFilters() {
   return (
     <div>
       <Toast msg={toast.msg} type={toast.type} />
+
+      {/* ── SQL Migration needed banner ─────────────────── */}
+      {migrationNeeded && (
+        <div style={{
+          padding: '14px 16px', borderRadius: '10px', marginBottom: '16px',
+          background: 'rgba(255,170,0,.08)', border: '1.5px solid rgba(255,170,0,.35)',
+        }}>
+          <div style={{ fontWeight: 800, fontSize: '13px', color: '#ffaa00', marginBottom: '8px' }}>
+            ⚠️ One-time SQL setup required
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text2)', lineHeight: 1.7, marginBottom: '10px' }}>
+            The <strong style={{ color: '#ffaa00' }}>🔗 Link Filters</strong> feature needs 2 new tables
+            in your Supabase database. Run the SQL below once in your
+            <strong> Supabase → SQL Editor</strong>, then refresh this page.
+          </div>
+          <div style={{
+            background: 'rgba(0,0,0,.5)', border: '1px solid rgba(255,170,0,.2)',
+            borderRadius: '8px', padding: '12px 14px', fontFamily: 'monospace',
+            fontSize: '10px', color: '#e0e0e0', lineHeight: 1.8,
+            userSelect: 'all', wordBreak: 'break-all',
+          }}>
+            {`CREATE TABLE IF NOT EXISTS filter_platform_service_types (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  platform_id uuid NOT NULL REFERENCES filter_platforms(id) ON DELETE CASCADE,
+  service_type_id uuid NOT NULL REFERENCES filter_service_types(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(platform_id, service_type_id)
+);
+
+CREATE TABLE IF NOT EXISTS filter_service_type_filter_types (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  service_type_id uuid NOT NULL REFERENCES filter_service_types(id) ON DELETE CASCADE,
+  filter_type_id uuid NOT NULL REFERENCES filter_types(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(service_type_id, filter_type_id)
+);
+
+ALTER TABLE filter_platform_service_types ENABLE ROW LEVEL SECURITY;
+ALTER TABLE filter_service_type_filter_types ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "read_fpst" ON filter_platform_service_types FOR SELECT USING (true);
+CREATE POLICY "read_stft" ON filter_service_type_filter_types FOR SELECT USING (true);
+CREATE POLICY "write_fpst" ON filter_platform_service_types FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "write_stft" ON filter_service_type_filter_types FOR ALL USING (auth.role() = 'authenticated');`}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '8px' }}>
+            💡 Tap and hold the SQL above to select all, then copy it into Supabase SQL Editor and click Run.
+          </div>
+        </div>
+      )}
 
       {/* Page header */}
       <div style={{ marginBottom: '18px' }}>
