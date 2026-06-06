@@ -57,6 +57,12 @@ export default function Marketplace({ user, onNav }) {
   const [serviceTypeMap,     setServiceTypeMap]     = useState({});
   const [filterTypeMap,      setFilterTypeMap]      = useState({});
 
+  // Direct admin-controlled stage links:
+  // platform_id -> Set<service_type_id> (which Stage 2 appear per platform)
+  const [platformServiceTypeMap,   setPlatformServiceTypeMap]   = useState({});
+  // service_type_id -> Set<filter_type_id> (which Stage 3 appear per service type)
+  const [serviceTypeFilterTypeMap, setServiceTypeFilterTypeMap] = useState({});
+
   // Custom prices from admin: serviceId -> price
   const [customPrices, setCustomPrices] = useState({});
 
@@ -143,6 +149,26 @@ export default function Marketplace({ user, onNav }) {
   const loadEverything = async () => {
     setLoading(true);
     try {
+      // ── Helper: fetch ALL rows from any table without hitting
+      // Supabase's default 1000-row cap per request ──────────
+      const fetchAll = async (table, cols = '*') => {
+        const JB = 100000;
+        let rows = [];
+        let f    = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { data, error } = await supabase
+            .from(table).select(cols).range(f, f + JB - 1);
+          if (error) throw error;
+          if (!data || data.length === 0) break;
+          rows = [...rows, ...data];
+          if (data.length < JB) break;
+          f += JB;
+        }
+        return rows;
+      };
+
+      // ── Services (active only, featured first) ────────────
       const BATCH = 1000;
       let allSvc  = [];
       let from    = 0;
@@ -162,6 +188,7 @@ export default function Marketplace({ user, onNav }) {
       }
       setServices(allSvc);
 
+      // ── Stage 1: platforms ────────────────────────────────
       const { data: plats } = await supabase
         .from('filter_platforms')
         .select('*')
@@ -170,16 +197,25 @@ export default function Marketplace({ user, onNav }) {
         .order('created_at');
       setFilterPlatforms(plats || []);
 
-      const { data: platSvc } = await supabase
-        .from('filter_platform_services')
-        .select('*');
+      // platform → services (can be > 1000 rows)
+      const platSvcRows = await fetchAll('filter_platform_services');
       const pm = {};
-      (platSvc || []).forEach(r => {
+      platSvcRows.forEach(r => {
         if (!pm[r.platform_id]) pm[r.platform_id] = new Set();
         pm[r.platform_id].add(r.service_id);
       });
       setPlatformServiceMap(pm);
 
+      // platform → directly linked service types (admin-controlled Stage 1→2)
+      const platStRows = await fetchAll('filter_platform_service_types');
+      const pstm = {};
+      platStRows.forEach(r => {
+        if (!pstm[r.platform_id]) pstm[r.platform_id] = new Set();
+        pstm[r.platform_id].add(r.service_type_id);
+      });
+      setPlatformServiceTypeMap(pstm);
+
+      // ── Stage 2: service types ────────────────────────────
       const { data: svcTypes } = await supabase
         .from('filter_service_types')
         .select('*')
@@ -188,16 +224,25 @@ export default function Marketplace({ user, onNav }) {
         .order('created_at');
       setFilterServiceTypes(svcTypes || []);
 
-      const { data: svcTypeSvc } = await supabase
-        .from('filter_service_type_services')
-        .select('*');
+      // service type → services (can be > 1000 rows)
+      const svcTypeSvcRows = await fetchAll('filter_service_type_services');
       const stm = {};
-      (svcTypeSvc || []).forEach(r => {
+      svcTypeSvcRows.forEach(r => {
         if (!stm[r.service_type_id]) stm[r.service_type_id] = new Set();
         stm[r.service_type_id].add(r.service_id);
       });
       setServiceTypeMap(stm);
 
+      // service type → directly linked filter types (admin-controlled Stage 2→3)
+      const stFtRows = await fetchAll('filter_service_type_filter_types');
+      const stftm = {};
+      stFtRows.forEach(r => {
+        if (!stftm[r.service_type_id]) stftm[r.service_type_id] = new Set();
+        stftm[r.service_type_id].add(r.filter_type_id);
+      });
+      setServiceTypeFilterTypeMap(stftm);
+
+      // ── Stage 3: filter types ─────────────────────────────
       const { data: ftypes } = await supabase
         .from('filter_types')
         .select('*')
@@ -206,21 +251,19 @@ export default function Marketplace({ user, onNav }) {
         .order('created_at');
       setFilterTypes(ftypes || []);
 
-      const { data: ftypeSvc } = await supabase
-        .from('filter_type_services')
-        .select('*');
+      // filter type → services (can be > 1000 rows)
+      const ftypeSvcRows = await fetchAll('filter_type_services');
       const ftm = {};
-      (ftypeSvc || []).forEach(r => {
+      ftypeSvcRows.forEach(r => {
         if (!ftm[r.filter_type_id]) ftm[r.filter_type_id] = new Set();
         ftm[r.filter_type_id].add(r.service_id);
       });
       setFilterTypeMap(ftm);
 
-      const { data: prices } = await supabase
-        .from('service_custom_prices')
-        .select('*');
+      // custom prices (can be > 1000 rows)
+      const priceRows = await fetchAll('service_custom_prices');
       const cp = {};
-      (prices || []).forEach(r => { cp[r.service_id] = r.custom_price; });
+      priceRows.forEach(r => { cp[r.service_id] = r.custom_price; });
       setCustomPrices(cp);
 
     } catch (e) {
@@ -241,67 +284,59 @@ export default function Marketplace({ user, onNav }) {
   const cl = (p) => platformColors[(p || '').toLowerCase()] || '#7b2fff';
 
   // ─────────────────────────────────────────────────────
-  // DERIVED: relevant service types for selected platform
-  // A service type is relevant if it shares at least one
-  // service with the currently selected platform.
-  // Admin controls this by linking services to both the
-  // platform filter AND the service type filter.
+  // DERIVED: relevant Stage 2 service types for the
+  // currently selected Stage 1 platform.
+  //
+  // Uses admin-controlled direct links from the table
+  // filter_platform_service_types (set in Manage Filters
+  // via the "🔗 Link Filters" button on each platform card).
+  //
+  // Fallback: if admin has not set any direct links for
+  // this platform yet, show ALL service types so the
+  // marketplace never shows an empty Stage 2.
   // ─────────────────────────────────────────────────────
   const relevantServiceTypes = React.useMemo(() => {
     if (!selPlatform || selPlatform.slug === 'everything') {
+      // No platform selected → show all service types
       return filterServiceTypes;
     }
-    const platformIds = platformServiceMap[selPlatform.id] || new Set();
-    if (platformIds.size === 0) return [];
-
-    return filterServiceTypes.filter(st => {
-      if (st.slug === 'all') return true;
-      const stIds = serviceTypeMap[st.id] || new Set();
-      for (const id of stIds) {
-        if (platformIds.has(id)) return true;
-      }
-      return false;
-    });
-  }, [selPlatform, filterServiceTypes, platformServiceMap, serviceTypeMap]);
+    const linked = platformServiceTypeMap[selPlatform.id];
+    if (!linked || linked.size === 0) {
+      // Admin has not linked any Stage 2 filters to this platform yet
+      // → show all so marketplace is never broken
+      return filterServiceTypes;
+    }
+    return filterServiceTypes.filter(st =>
+      st.slug === 'all' || linked.has(st.id)
+    );
+  }, [selPlatform, filterServiceTypes, platformServiceTypeMap]);
 
   // ─────────────────────────────────────────────────────
-  // DERIVED: relevant filter types for selected platform
-  // + service type combo.
-  // A filter type is relevant if it shares at least one
-  // service with the current filtered service pool.
+  // DERIVED: relevant Stage 3 filter types for the
+  // currently selected Stage 2 service type.
+  //
+  // Uses admin-controlled direct links from the table
+  // filter_service_type_filter_types (set in Manage Filters
+  // via the "🔗 Link Filters" button on each service type card).
+  //
+  // Fallback: if admin has not set any direct links for
+  // this service type yet, show ALL filter types.
   // ─────────────────────────────────────────────────────
   const relevantFilterTypes = React.useMemo(() => {
-    let poolIds = null; // null means "all services"
-
-    if (selPlatform && selPlatform.slug !== 'everything') {
-      poolIds = platformServiceMap[selPlatform.id] || new Set();
+    if (!selServiceType || selServiceType.slug === 'all') {
+      // No service type selected → show all filter types
+      return filterTypes;
     }
-
-    if (selServiceType && selServiceType.slug !== 'all') {
-      const stIds = serviceTypeMap[selServiceType.id] || new Set();
-      if (poolIds === null) {
-        poolIds = stIds;
-      } else {
-        const intersected = new Set();
-        for (const id of stIds) {
-          if (poolIds.has(id)) intersected.add(id);
-        }
-        poolIds = intersected;
-      }
+    const linked = serviceTypeFilterTypeMap[selServiceType.id];
+    if (!linked || linked.size === 0) {
+      // Admin has not linked any Stage 3 filters to this service type yet
+      // → show all so marketplace is never broken
+      return filterTypes;
     }
-
-    if (poolIds === null) return filterTypes;
-    if (poolIds.size === 0) return [];
-
-    return filterTypes.filter(ft => {
-      if (ft.slug === 'all') return true;
-      const ftIds = filterTypeMap[ft.id] || new Set();
-      for (const id of ftIds) {
-        if (poolIds.has(id)) return true;
-      }
-      return false;
-    });
-  }, [selPlatform, selServiceType, filterTypes, platformServiceMap, serviceTypeMap, filterTypeMap]);
+    return filterTypes.filter(ft =>
+      ft.slug === 'all' || linked.has(ft.id)
+    );
+  }, [selServiceType, filterTypes, serviceTypeFilterTypeMap]);
 
   // ─────────────────────────────────────────────────────
   // FILTERING + SORTING
@@ -460,30 +495,6 @@ export default function Marketplace({ user, onNav }) {
       setQty('');
     }, 2500);
   };
-
-  // ─────────────────────────────────────────────────────
-  // FilterPill — box-style pill (Stage 1 / Select Platform)
-  // Scrollable horizontal row
-  // ─────────────────────────────────────────────────────
-  const FilterPill = ({ item, isSelected, onClick, color }) => (
-    <div
-      onClick={onClick}
-      style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
-        padding: '10px 6px', borderRadius: '10px', cursor: 'pointer', minWidth: '62px',
-        background:  isSelected ? `${color}18` : 'rgba(0,0,0,.2)',
-        border:      `1.5px solid ${isSelected ? color : 'var(--br)'}`,
-        transition:  'all .15s', userSelect: 'none', flexShrink: 0,
-      }}>
-      <span style={{ fontSize: '18px' }}>{item.icon}</span>
-      <span style={{
-        fontSize: '9px', fontWeight: isSelected ? 800 : 600,
-        color:    isSelected ? color : 'var(--text3)',
-        textAlign: 'center', lineHeight: 1.2, maxWidth: '60px',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{item.name}</span>
-    </div>
-  );
 
   // ─────────────────────────────────────────────────────
   // ServiceCard — shared card component
@@ -653,7 +664,8 @@ export default function Marketplace({ user, onNav }) {
         <div>
 
           {/* ── STAGE 1: SELECT PLATFORM ────────────────── */}
-          {/* Box-style, scrollable horizontal               */}
+          {/* Round pill style, FIXED (wrapped, not scrollable) */}
+          {/* Matches Stage 2 & 3 exactly                       */}
           {filterPlatforms.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
               <div style={{
@@ -662,31 +674,53 @@ export default function Marketplace({ user, onNav }) {
               }}>
                 SELECT PLATFORM
               </div>
-              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {/* flexWrap: wrap = fixed, same as Stage 2 & 3 — no horizontal scroll */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 {/* Everything pill */}
-                <FilterPill
-                  item={{ icon: '🌐', name: 'Everything' }}
-                  isSelected={!selPlatform || selPlatform?.slug === 'everything'}
-                  color="var(--neon)"
+                <div
                   onClick={() => {
                     setSelPlatform(null);
                     setSelServiceType(null);
                     setSelFilterType(null);
                   }}
-                />
-                {filterPlatforms.filter(p => p.slug !== 'everything').map(p => (
-                  <FilterPill
-                    key={p.id}
-                    item={p}
-                    isSelected={selPlatform?.id === p.id}
-                    color={p.color || '#00d4ff'}
-                    onClick={() => {
-                      setSelPlatform(p);
-                      setSelServiceType(null);
-                      setSelFilterType(null);
-                    }}
-                  />
-                ))}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                    background: !selPlatform ? 'rgba(0,212,255,.12)' : 'rgba(0,0,0,.2)',
+                    border: `1.5px solid ${!selPlatform ? 'var(--neon)' : 'var(--br)'}`,
+                    fontSize: '10px', fontWeight: !selPlatform ? 800 : 600,
+                    color: !selPlatform ? 'var(--neon)' : 'var(--text3)',
+                    transition: 'all .15s', userSelect: 'none',
+                  }}>
+                  🌐 Everything
+                </div>
+                {filterPlatforms.filter(p => p.slug !== 'everything').map(p => {
+                  const isOn    = selPlatform?.id === p.id;
+                  const pColor  = p.color || '#00d4ff';
+                  const pRgb    = pColor.startsWith('#') && pColor.length === 7
+                    ? `${parseInt(pColor.slice(1,3),16)},${parseInt(pColor.slice(3,5),16)},${parseInt(pColor.slice(5,7),16)}`
+                    : '0,212,255';
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => {
+                        setSelPlatform(p);
+                        setSelServiceType(null);
+                        setSelFilterType(null);
+                      }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '5px',
+                        padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                        background: isOn ? `rgba(${pRgb},.12)` : 'rgba(0,0,0,.2)',
+                        border: `1.5px solid ${isOn ? pColor : 'var(--br)'}`,
+                        fontSize: '10px', fontWeight: isOn ? 800 : 600,
+                        color: isOn ? pColor : 'var(--text3)',
+                        transition: 'all .15s', userSelect: 'none',
+                      }}>
+                      {p.icon} {p.name}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
