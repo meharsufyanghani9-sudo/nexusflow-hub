@@ -146,11 +146,15 @@ function ServicePickerModal({
                 placeholder="🔍 Search by name, platform or service ID..."
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', flexWrap: 'wrap', flexShrink: 0 }}>
-              <button className="btn bgh bsm" onClick={selectAllVisible} style={{ flex: 1 }}>✅ Select Visible ({filtered.length})</button>
-              <button className="btn bgh bsm" onClick={clearAllVisible}  style={{ flex: 1 }}>❌ Clear Visible</button>
-              <button className="btn bgh bsm" onClick={selectAllInList}  style={{ flex: 1 }}>✅ Select ALL ({allServices.length})</button>
-              <button className="btn bgh bsm" onClick={clearAll}         style={{ flex: 1 }}>🗑 Clear ALL</button>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2,1fr)',
+              gap: '5px', marginBottom: '10px', flexShrink: 0,
+            }}>
+              <button className="btn bgh bsm" onClick={selectAllVisible}>✅ Visible ({filtered.length})</button>
+              <button className="btn bgh bsm" onClick={clearAllVisible}>❌ Clear Visible</button>
+              <button className="btn bgh bsm" onClick={selectAllInList}>✅ All ({allServices.length})</button>
+              <button className="btn bgh bsm" onClick={clearAll}>🗑 Clear All</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
               {filtered.length === 0 ? (
