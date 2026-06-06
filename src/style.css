@@ -360,6 +360,17 @@ td{padding:9px 10px;border-top:1px solid var(--br);vertical-align:middle}
 }
 .mkt-card:hover{border-color:var(--br2);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
 
+/* ── Compact featured cards (Image 1 reference: small 2-col layout) ── */
+.mkt-card-compact{padding:10px;}
+.mkt-grid-featured{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:8px;
+}
+@media(min-width:600px){.mkt-grid-featured{grid-template-columns:repeat(3,1fr)}}
+@media(min-width:900px){.mkt-grid-featured{grid-template-columns:repeat(4,1fr)}}
+@media(min-width:1200px){.mkt-grid-featured{grid-template-columns:repeat(5,1fr)}}
+
 /* ═══ DEPOSIT ═══ */
 .warn-bn{background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.22);border-radius:7px;padding:9px 12px;font-size:11px;color:var(--warn);margin-bottom:14px;line-height:1.6}
 
