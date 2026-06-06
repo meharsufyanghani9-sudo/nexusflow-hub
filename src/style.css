@@ -160,8 +160,11 @@ body::after{
   background:rgba(2,4,8,.97);backdrop-filter:blur(16px);
   border-bottom:1px solid var(--br);
   display:flex;align-items:center;justify-content:space-between;
-  padding:0 12px;height:54px;gap:8px;flex-shrink:0;
-  width:100%;
+  padding:0 12px;
+  padding-left:max(12px, env(safe-area-inset-left, 12px));
+  padding-right:max(12px, env(safe-area-inset-right, 12px));
+  height:54px;gap:8px;flex-shrink:0;
+  width:100%;box-sizing:border-box;
 }
 .topbar-left{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
 .topbar-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
@@ -194,12 +197,21 @@ body::after{
 /* ═══ PAGE CONTENT ═══ */
 .page-content{
   flex:1;
-  padding:14px;
-  padding-bottom:calc(var(--mnh) + 14px);
+  padding:12px;
+  /* Extra bottom padding for mobile nav + safe area (notch phones) */
+  padding-bottom:calc(var(--mnh) + 12px + env(safe-area-inset-bottom, 0px));
   overflow-x:hidden;
+  width:100%;
+  box-sizing:border-box;
+  /* Prevent content from stretching too wide on huge screens */
+  max-width:1600px;
+  align-self:center;
+}
+@media(min-width:640px){
+  .page-content{padding:14px 16px;padding-bottom:calc(var(--mnh) + 14px)}
 }
 @media(min-width:900px){
-  .page-content{padding:20px 22px;padding-bottom:22px}
+  .page-content{padding:20px 22px;padding-bottom:22px;max-width:none}
 }
 @media(min-width:1400px){
   .page-content{padding:24px 32px;padding-bottom:32px}
@@ -208,10 +220,13 @@ body::after{
 /* ═══ MOBILE NAV ═══ */
 .mobnav{
   display:flex;
-  position:fixed;bottom:0;left:0;right:0;height:var(--mnh);
+  position:fixed;bottom:0;left:0;right:0;
+  height:calc(var(--mnh) + env(safe-area-inset-bottom, 0px));
   z-index:9000;background:rgba(3,8,18,.98);
   border-top:1px solid var(--br);backdrop-filter:blur(20px);
-  align-items:center;justify-content:space-around;padding:0 2px;
+  align-items:flex-start;justify-content:space-around;
+  padding:0 2px;
+  padding-bottom:env(safe-area-inset-bottom, 0px);
 }
 .mni{
   display:flex;flex-direction:column;align-items:center;gap:2px;
@@ -650,50 +665,135 @@ body.light .cd{color:var(--danger)}
   box-shadow:0 8px 28px rgba(255,215,0,.12)!important
 }
 
-/* ═══ MOBILE RESPONSIVENESS FIXES ═══ */
+/* ═══ MOBILE RESPONSIVENESS — COMPREHENSIVE ═══ */
+
+/* Prevent zoom on input focus (iOS) */
+input,select,textarea{font-size:16px!important;}
+
+/* Tables always scroll horizontally — never overflow */
 .tblw{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .tblw table{min-width:600px}
 
-@media(max-width:480px){
+/* Admin filter cards grid — always uses auto-fill so never overflows */
+.filter-cards-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(80px,1fr));
+  gap:8px;
+}
+
+/* Modal action button rows — wrap instead of overflow */
+.modal-btn-row{
+  display:flex;gap:5px;flex-wrap:wrap;
+  margin-bottom:10px;
+}
+.modal-btn-row > *{flex:1 1 calc(50% - 3px);min-width:0;}
+
+/* ── Base mobile (all phones) ── */
+@media(max-width:767px){
+  /* Page content: safe padding, accounts for bottom nav */
+  .page-content{
+    padding:10px 10px;
+    padding-bottom:calc(var(--mnh) + 12px);
+    width:100%;
+    box-sizing:border-box;
+    overflow-x:hidden;
+  }
+
+  /* Topbar: tighter on small screens */
+  .topbar{padding:0 8px;height:50px;gap:6px}
+  .pgtl{font-size:11px;letter-spacing:1px}
+  .bal-chip{padding:4px 7px}
+  .bc-val{font-size:11px}
+
+  /* Sidebar: never wider than 85% of screen */
+  .sidebar{width:min(var(--sw),85vw)}
+
+  /* Stat cards: 2 column */
   .cgrid{grid-template-columns:repeat(2,1fr);gap:8px}
   .sc{padding:10px 8px}
   .sc-vl{font-size:clamp(12px,3vw,18px)}
   .sc-lb{font-size:7.5px}
   .sc-ic{font-size:16px}
-  .mkt-grid{grid-template-columns:1fr!important}
-  .page-content{padding:10px 10px;padding-bottom:calc(var(--mnh) + 10px)}
-  .topbar{padding:0 8px;height:50px}
-  .pgtl{font-size:11px;letter-spacing:1px}
-  .bal-chip{padding:4px 7px}
-  .bc-val{font-size:11px}
+
+  /* Balance hero */
   .bhr{padding:14px!important}
   .bh-ft{flex-direction:column!important;gap:8px!important}
+
+  /* Marketplace: single column on small phones */
+  .mkt-grid{grid-template-columns:1fr!important}
+
+  /* Modal: slides up from bottom on phones */
+  .mlay{align-items:flex-end!important;padding:0!important}
+  .mbox{
+    width:100%!important;
+    max-width:100%!important;
+    border-radius:18px 18px 0 0!important;
+    position:fixed!important;
+    bottom:0!important;left:0!important;right:0!important;
+    margin:0!important;
+    padding:16px 12px 20px!important;
+    max-height:92vh!important;
+  }
+
+  /* Admin filter card grids: auto-fill, never overflow */
+  div[style*="minmax(80px"]{grid-template-columns:repeat(auto-fill,minmax(72px,1fr))!important}
+  div[style*="minmax(90px"]{grid-template-columns:repeat(auto-fill,minmax(80px,1fr))!important}
   div[style*="minmax(150px"]{grid-template-columns:repeat(2,1fr)!important}
   div[style*="minmax(140px"]{grid-template-columns:repeat(2,1fr)!important}
+
+  /* Admin service picker action button row — wrap to 2×2 */
+  div[style*="flex-wrap:wrap"]{flex-wrap:wrap!important}
+  .modal-btn-row,.picker-btn-row{flex-wrap:wrap!important}
+  .modal-btn-row > *,.picker-btn-row > *{flex:1 1 calc(50% - 3px)!important;min-width:0!important}
+
+  /* Bottom nav text smaller on tiny screens */
+  .mni{font-size:6.5px;padding:5px 3px}
+  .mni-ic{font-size:14px}
 }
 
-@media(max-width:480px){
-  .mbox{
-    width:calc(100% - 16px)!important;
-    max-width:100%!important;
-    border-radius:16px 16px 0 0;
-    position:fixed;bottom:0;left:0;right:0;
-    margin:0!important;top:auto!important;
-  }
-  .mlay{align-items:flex-end!important;padding:0!important}
-}
-
-@media(min-width:481px) and (max-width:767px){
-  .mkt-grid{grid-template-columns:repeat(2,1fr)}
-}
-
-@media(max-width:899px){
-  .sidebar{width:min(var(--sw), 85vw)}
-}
-
-@media(max-width:360px){
+/* ── Very small phones (≤380px) ── */
+@media(max-width:380px){
+  .page-content{padding:8px 8px;padding-bottom:calc(var(--mnh) + 10px)}
+  .topbar{padding:0 6px;height:48px}
+  .pgtl{font-size:10px;letter-spacing:0.5px}
+  .bal-chip{padding:3px 6px;gap:3px}
+  .bc-val{font-size:10px}
+  .bc-lbl{font-size:6px}
+  .cgrid{gap:6px}
+  .sc{padding:8px 6px}
   .mni{font-size:6px;padding:4px 2px}
   .mni-ic{font-size:13px}
+  .mbox{padding:12px 10px 18px!important}
+  .fr{grid-template-columns:1fr}
+  /* Single column marketplace on tiny phones */
+  .mkt-grid-featured{grid-template-columns:repeat(2,1fr)!important;gap:6px}
+}
+
+/* ── Tablet (481px–767px): 2 col marketplace ── */
+@media(min-width:481px) and (max-width:767px){
+  .mkt-grid{grid-template-columns:repeat(2,1fr)!important}
+  .mkt-grid-featured{grid-template-columns:repeat(3,1fr)!important}
+  .page-content{padding:12px 14px;padding-bottom:calc(var(--mnh) + 14px)}
+}
+
+/* ── Tablet landscape / small desktop (768px–899px) ── */
+@media(min-width:768px) and (max-width:899px){
+  .mkt-grid{grid-template-columns:repeat(3,1fr)}
+  .page-content{padding:14px 16px;padding-bottom:calc(var(--mnh) + 14px)}
+  .mlay{align-items:center;padding:16px}
+  .mbox{
+    max-width:520px!important;
+    border-radius:var(--r2)!important;
+    position:relative!important;
+    bottom:auto!important;
+    padding:20px 16px!important;
+    max-height:88vh!important;
+  }
+}
+
+/* ═══ SIDEBAR ON DESKTOP ═══ */
+@media(max-width:899px){
+  .sidebar{width:min(var(--sw),85vw)}
 }
 
 /* ═══ LIGHT MODE FEATURED ═══ */
@@ -701,6 +801,9 @@ body.light .mkt-featured{
   background:linear-gradient(135deg,rgba(255,184,0,.08),rgba(255,255,255,.9))!important;
   border-color:rgba(200,140,0,.35)!important;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ═══ ANIMATIONS ═══ */
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ═══ 2-COL GRID UTILITY ═══ */
 .mkt-grid-2col{display:grid;grid-template-columns:repeat(2,1fr)!important;gap:12px;}
-input,select,textarea{font-size:16px!important;}
