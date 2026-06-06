@@ -6,9 +6,9 @@ import { supabase } from './supabase';
 // ─────────────────────────────────────────────────────────
 function Toast({ msg, type }) {
   if (!msg) return null;
-  const bg     = type === 'error' ? 'rgba(255,50,80,.10)'             : 'rgba(0,255,136,.08)';
-  const border = type === 'error' ? '1px solid rgba(255,50,80,.25)'   : '1px solid rgba(0,255,136,.25)';
-  const color  = type === 'error' ? '#ff6b6b'                        : 'var(--green)';
+  const bg     = type === 'error' ? 'rgba(255,50,80,.10)'           : 'rgba(0,255,136,.08)';
+  const border = type === 'error' ? '1px solid rgba(255,50,80,.25)' : '1px solid rgba(0,255,136,.25)';
+  const color  = type === 'error' ? '#ff6b6b'                       : 'var(--green)';
   return (
     <div style={{ background: bg, border, borderRadius: '8px', padding: '11px 14px',
       color, fontWeight: 700, fontSize: '12px', marginBottom: '16px',
@@ -32,6 +32,7 @@ function StageBadge({ label, color }) {
 
 // ─────────────────────────────────────────────────────────
 // SERVICE PICKER MODAL
+// Used for Stage 1: link services to a platform
 // ─────────────────────────────────────────────────────────
 function ServicePickerModal({
   title,
@@ -64,18 +65,11 @@ function ServicePickerModal({
            String(s.provider_service_id || '').includes(q);
   });
 
-  const toggle = (id) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const selectAllVisible  = () => setSelected(prev => { const n = new Set(prev); filtered.forEach(s => n.add(s.id)); return n; });
-  const clearAllVisible   = () => setSelected(prev => { const n = new Set(prev); filtered.forEach(s => n.delete(s.id)); return n; });
-  const selectAllInList   = () => setSelected(new Set(allServices.map(s => s.id)));
-  const clearAll          = () => setSelected(new Set());
+  const toggle           = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const selectAllVisible = () => setSelected(prev => { const n = new Set(prev); filtered.forEach(s => n.add(s.id)); return n; });
+  const clearAllVisible  = () => setSelected(prev => { const n = new Set(prev); filtered.forEach(s => n.delete(s.id)); return n; });
+  const selectAllInList  = () => setSelected(new Set(allServices.map(s => s.id)));
+  const clearAll         = () => setSelected(new Set());
 
   const handleSave = async () => {
     setSaving(true);
@@ -87,9 +81,7 @@ function ServicePickerModal({
     setSaving(false);
   };
 
-  const setPrice = (serviceId, val) => {
-    setPriceEdits(prev => { const m = new Map(prev); m.set(serviceId, val); return m; });
-  };
+  const setPrice = (serviceId, val) => setPriceEdits(prev => { const m = new Map(prev); m.set(serviceId, val); return m; });
 
   const applyBulkPercent = () => {
     const pct = parseFloat(bulkPercent);
@@ -124,7 +116,6 @@ function ServicePickerModal({
       <div className="mbox" onClick={e => e.stopPropagation()}
         style={{ maxWidth: '580px', width: '100%', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
 
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '14px', flexShrink: 0 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)' }}>{title}</div>
@@ -137,7 +128,6 @@ function ServicePickerModal({
               fontSize: '22px', lineHeight: 1, flexShrink: 0 }}>×</button>
         </div>
 
-        {/* Tabs */}
         <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexShrink: 0 }}>
           <button className={`btn bsm ${tab === 'services' ? 'bp' : 'bgh'}`}
             onClick={() => setTab('services')} style={{ flex: 1 }}>
@@ -149,7 +139,6 @@ function ServicePickerModal({
           </button>
         </div>
 
-        {/* ── SERVICES TAB ── */}
         {tab === 'services' && (
           <>
             <div style={{ marginBottom: '8px', flexShrink: 0 }}>
@@ -157,27 +146,15 @@ function ServicePickerModal({
                 placeholder="🔍 Search by name, platform or service ID..."
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-
             <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', flexWrap: 'wrap', flexShrink: 0 }}>
-              <button className="btn bgh bsm" onClick={selectAllVisible} style={{ flex: 1 }}>
-                ✅ Select Visible ({filtered.length})
-              </button>
-              <button className="btn bgh bsm" onClick={clearAllVisible} style={{ flex: 1 }}>
-                ❌ Clear Visible
-              </button>
-              <button className="btn bgh bsm" onClick={selectAllInList} style={{ flex: 1 }}>
-                ✅ Select ALL ({allServices.length})
-              </button>
-              <button className="btn bgh bsm" onClick={clearAll} style={{ flex: 1 }}>
-                🗑 Clear ALL
-              </button>
+              <button className="btn bgh bsm" onClick={selectAllVisible} style={{ flex: 1 }}>✅ Select Visible ({filtered.length})</button>
+              <button className="btn bgh bsm" onClick={clearAllVisible}  style={{ flex: 1 }}>❌ Clear Visible</button>
+              <button className="btn bgh bsm" onClick={selectAllInList}  style={{ flex: 1 }}>✅ Select ALL ({allServices.length})</button>
+              <button className="btn bgh bsm" onClick={clearAll}         style={{ flex: 1 }}>🗑 Clear ALL</button>
             </div>
-
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
               {filtered.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
-                  No services found
-                </div>
+                <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>No services found</div>
               ) : (
                 filtered.map(s => {
                   const isOn      = selected.has(s.id);
@@ -228,21 +205,17 @@ function ServicePickerModal({
                 })
               )}
             </div>
-
             <button className="btn bp blg bw" onClick={handleSave} disabled={saving} style={{ flexShrink: 0 }}>
               {saving ? '⏳ Saving...' : `💾 Save Selection (${selected.size} services)`}
             </button>
           </>
         )}
 
-        {/* ── PRICES TAB ── */}
         {tab === 'prices' && (
           <>
             <div style={{ marginBottom: '12px', flexShrink: 0 }}>
               <div style={{ fontSize: '9px', color: 'var(--text3)', marginBottom: '7px',
-                textTransform: 'uppercase', letterSpacing: '2px' }}>
-                Price Edit Mode
-              </div>
+                textTransform: 'uppercase', letterSpacing: '2px' }}>Price Edit Mode</div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button onClick={() => setPriceMode('manual')}
                   className={`btn bsm ${priceMode === 'manual' ? 'bp' : 'bgh'}`} style={{ flex: 1 }}>
@@ -254,7 +227,6 @@ function ServicePickerModal({
                 </button>
               </div>
             </div>
-
             {priceMode === 'percent' && (
               <div style={{ padding: '12px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0,
                 background: 'rgba(0,212,255,.04)', border: '1px solid rgba(0,212,255,.15)' }}>
@@ -263,14 +235,12 @@ function ServicePickerModal({
                   Applies to all {servicesInFilter.length} selected services
                 </div>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <select className="sel" value={bulkDirection} onChange={e => setBulkDirection(e.target.value)}
-                    style={{ width: '120px' }}>
+                  <select className="sel" value={bulkDirection} onChange={e => setBulkDirection(e.target.value)} style={{ width: '120px' }}>
                     <option value="increase">📈 Increase</option>
                     <option value="decrease">📉 Decrease</option>
                   </select>
                   <input className="inp" type="number" placeholder="e.g. 10"
-                    value={bulkPercent} onChange={e => setBulkPercent(e.target.value)}
-                    style={{ width: '90px' }} />
+                    value={bulkPercent} onChange={e => setBulkPercent(e.target.value)} style={{ width: '90px' }} />
                   <span style={{ fontSize: '12px', color: 'var(--text3)' }}>%</span>
                   <button className="btn bp bsm" onClick={applyBulkPercent}>⚡ Apply</button>
                 </div>
@@ -279,11 +249,10 @@ function ServicePickerModal({
                 </div>
               </div>
             )}
-
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
               {servicesInFilter.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
-                  No services selected yet. Go to "Select Services" tab first and check some services.
+                  No services selected yet. Go to "Select Services" tab first.
                 </div>
               ) : (
                 servicesInFilter.map(s => {
@@ -314,22 +283,156 @@ function ServicePickerModal({
                           onChange={e => setPrice(s.id, e.target.value)}
                           style={{ flex: 1, padding: '6px 10px' }} />
                         <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>/1k</span>
-                        {editVal && (
-                          <button className="btn bgh bsm" onClick={() => setPrice(s.id, '')}>↺</button>
-                        )}
+                        {editVal && <button className="btn bgh bsm" onClick={() => setPrice(s.id, '')}>↺</button>}
                       </div>
                     </div>
                   );
                 })
               )}
             </div>
-
-            <button className="btn bp blg bw" onClick={handleSavePrices} disabled={savingPrices}
-              style={{ flexShrink: 0 }}>
+            <button className="btn bp blg bw" onClick={handleSavePrices} disabled={savingPrices} style={{ flexShrink: 0 }}>
               {savingPrices ? '⏳ Saving...' : '💾 Save Custom Prices'}
             </button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// FILTER LINKER MODAL
+// Used to link Stage 2 service types to a Stage 1 platform,
+// or link Stage 3 filter types to a Stage 2 service type.
+// allItems  = all available Stage 2 (or Stage 3) filter items
+// linked    = Set of IDs currently linked to the parent
+// ─────────────────────────────────────────────────────────
+function FilterLinkerModal({ title, subtitle, allItems, linked, itemColor, onSave, onClose }) {
+  const [selected, setSelected] = useState(new Set(linked));
+  const [saving,   setSaving]   = useState(false);
+
+  const toggle = (id) => setSelected(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const handleSave = async () => {
+    setSaving(true);
+    const added   = [];
+    const removed = [];
+    for (const id of selected) { if (!linked.has(id)) added.push(id); }
+    for (const id of linked)   { if (!selected.has(id)) removed.push(id); }
+    await onSave(added, removed);
+    setSaving(false);
+  };
+
+  return (
+    <div className="mlay" onClick={onClose} style={{ zIndex: 850 }}>
+      <div className="mbox" onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '480px', width: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '6px', flexShrink: 0 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)' }}>{title}</div>
+            {subtitle && (
+              <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '3px' }}>{subtitle}</div>
+            )}
+          </div>
+          <button onClick={onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '22px', flexShrink: 0 }}>×</button>
+        </div>
+
+        {/* Info box */}
+        <div style={{
+          padding: '8px 12px', borderRadius: '7px', marginBottom: '14px', flexShrink: 0,
+          background: 'rgba(0,212,255,.05)', border: '1px solid rgba(0,212,255,.15)',
+          fontSize: '10px', color: 'var(--text3)', lineHeight: 1.6,
+        }}>
+          ✅ Checked items will appear in the marketplace when this filter is selected.<br/>
+          ❌ Unchecked items will be hidden for this filter.
+        </div>
+
+        {/* Item list */}
+        <div style={{ flex: 1, overflowY: 'auto', marginBottom: '14px' }}>
+          {allItems.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
+              No filters to link. Create some first using the + button.
+            </div>
+          ) : (
+            allItems.map(item => {
+              const isOn = selected.has(item.id);
+              const color = item.color || itemColor || '#00d4ff';
+              return (
+                <div key={item.id} onClick={() => toggle(item.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '11px 14px', borderRadius: '9px', marginBottom: '6px',
+                    cursor: 'pointer', transition: 'all .12s',
+                    background: isOn ? `${color}12` : 'rgba(0,0,0,.2)',
+                    border: `1.5px solid ${isOn ? color : 'var(--br)'}`,
+                  }}>
+                  {/* Checkbox */}
+                  <div style={{
+                    width: '20px', height: '20px', borderRadius: '5px', flexShrink: 0,
+                    border: `2px solid ${isOn ? color : 'var(--br2)'}`,
+                    background: isOn ? color : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '11px', color: '#000', fontWeight: 900,
+                    transition: 'all .12s',
+                  }}>
+                    {isOn ? '✓' : ''}
+                  </div>
+                  {/* Icon + name */}
+                  <div style={{
+                    width: '36px', height: '36px', borderRadius: '8px', flexShrink: 0,
+                    background: `${color}18`, border: `1px solid ${color}30`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '18px',
+                  }}>
+                    {item.icon || '⚙️'}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: isOn ? 800 : 600, fontSize: '12px', color: isOn ? color : 'var(--text)' }}>
+                      {item.name}
+                    </div>
+                    {item.slug && (
+                      <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '1px' }}>
+                        slug: {item.slug}
+                      </div>
+                    )}
+                  </div>
+                  {isOn && (
+                    <span style={{
+                      fontSize: '8px', fontWeight: 800, padding: '2px 7px', borderRadius: '8px',
+                      background: `${color}20`, color, border: `1px solid ${color}40`,
+                      textTransform: 'uppercase', letterSpacing: '0.5px', flexShrink: 0,
+                    }}>
+                      LINKED
+                    </span>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Quick select buttons */}
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexShrink: 0 }}>
+          <button className="btn bgh bsm" style={{ flex: 1 }}
+            onClick={() => setSelected(new Set(allItems.map(i => i.id)))}>
+            ✅ Select All
+          </button>
+          <button className="btn bgh bsm" style={{ flex: 1 }}
+            onClick={() => setSelected(new Set())}>
+            🗑 Clear All
+          </button>
+        </div>
+
+        <button className="btn bp blg bw" onClick={handleSave} disabled={saving} style={{ flexShrink: 0 }}>
+          {saving ? '⏳ Saving...' : `💾 Save Links (${selected.size} linked)`}
+        </button>
       </div>
     </div>
   );
@@ -380,7 +483,6 @@ function FilterFormModal({ onSave, onClose, title }) {
                 cursor: 'pointer', background: 'none', padding: 0 }} />
           </div>
         </div>
-        {/* Preview */}
         <div style={{ marginBottom: '14px', padding: '10px 14px', borderRadius: '8px',
           background: 'rgba(0,0,0,.3)', border: '1px solid var(--br)',
           display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -401,10 +503,8 @@ function FilterFormModal({ onSave, onClose, title }) {
 
 // ─────────────────────────────────────────────────────────
 // FILTER CARD
-// isActive = true means this card is currently "selected" by admin
-// and shows a glowing border so admin knows which filter context they are in
 // ─────────────────────────────────────────────────────────
-function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial, isActive }) {
+function FilterCard({ item, onDelete, onManageServices, onLinkFilters, serviceCount, linkedCount, isSpecial, isActive }) {
   const [hover, setHover] = useState(false);
   const color = item.color || '#00d4ff';
 
@@ -412,32 +512,35 @@ function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial,
     <div style={{ position: 'relative' }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}>
-      <div
-        onClick={() => !isSpecial && onManageServices(item)}
-        style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: '6px', padding: '12px 8px', borderRadius: '12px',
-          cursor: isSpecial ? 'default' : 'pointer',
-          // When isActive: strong glowing border + brighter background to show "you are here"
-          background: isActive ? `${color}22` : `${color}0d`,
-          border: isActive
-            ? `2.5px solid ${color}`
-            : `1.5px solid ${color}30`,
-          boxShadow: isActive ? `0 0 12px ${color}55` : 'none',
-          transition: 'all .15s', minHeight: '80px', position: 'relative',
-          userSelect: 'none',
-        }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: '4px', padding: '10px 6px', borderRadius: '12px',
+        background: isActive ? `${color}22` : `${color}0d`,
+        border: isActive ? `2.5px solid ${color}` : `1.5px solid ${color}30`,
+        boxShadow: isActive ? `0 0 12px ${color}55` : 'none',
+        transition: 'all .15s', minHeight: '80px', position: 'relative',
+        userSelect: 'none',
+      }}>
         <div style={{ fontSize: '22px' }}>{item.icon}</div>
         <div style={{ fontSize: '10px', fontWeight: isActive ? 900 : 700,
           color: isActive ? color : 'var(--text)', textAlign: 'center', lineHeight: 1.2 }}>
           {item.name}
         </div>
+
+        {/* Service count badge */}
         {serviceCount != null && (
           <div style={{ fontSize: '9px', color, fontWeight: 600 }}>
             {serviceCount} svc{serviceCount !== 1 ? 's' : ''}
           </div>
         )}
-        {/* "ACTIVE" badge shown when this filter is selected */}
+
+        {/* Linked filter count badge */}
+        {linkedCount != null && (
+          <div style={{ fontSize: '8px', color: 'var(--text3)', fontWeight: 600 }}>
+            {linkedCount} filter{linkedCount !== 1 ? 's' : ''} linked
+          </div>
+        )}
+
         {isActive && (
           <div style={{
             position: 'absolute', top: '-8px', left: '50%', transform: 'translateX(-50%)',
@@ -448,20 +551,56 @@ function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial,
             SELECTED
           </div>
         )}
-        {/* Delete button on hover — hidden for special All/Everything items */}
+
+        {/* Hover actions */}
         {hover && !isSpecial && (
-          <button
-            onClick={e => { e.stopPropagation(); onDelete(item); }}
-            style={{
-              position: 'absolute', top: '-6px', right: '-6px',
-              width: '20px', height: '20px', borderRadius: '50%',
-              background: 'rgba(255,50,80,.9)', border: 'none',
-              color: '#fff', fontSize: '10px', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 800, zIndex: 10, boxShadow: '0 2px 8px rgba(255,50,80,.4)',
-            }}>×</button>
+          <>
+            {/* Delete button */}
+            <button
+              onClick={e => { e.stopPropagation(); onDelete(item); }}
+              style={{
+                position: 'absolute', top: '-6px', right: '-6px',
+                width: '20px', height: '20px', borderRadius: '50%',
+                background: 'rgba(255,50,80,.9)', border: 'none',
+                color: '#fff', fontSize: '10px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 800, zIndex: 10, boxShadow: '0 2px 8px rgba(255,50,80,.4)',
+              }}>×</button>
+          </>
         )}
       </div>
+
+      {/* Action buttons below card — always visible for non-special items */}
+      {!isSpecial && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
+          {/* Manage services button */}
+          {onManageServices && (
+            <button
+              onClick={() => onManageServices(item)}
+              style={{
+                width: '100%', padding: '4px 0', fontSize: '8px', fontWeight: 700,
+                background: 'rgba(0,212,255,.08)', border: '1px solid rgba(0,212,255,.2)',
+                borderRadius: '6px', color: 'var(--neon)', cursor: 'pointer',
+                transition: 'all .12s',
+              }}>
+              📋 Services
+            </button>
+          )}
+          {/* Link filters button */}
+          {onLinkFilters && (
+            <button
+              onClick={() => onLinkFilters(item)}
+              style={{
+                width: '100%', padding: '4px 0', fontSize: '8px', fontWeight: 700,
+                background: 'rgba(123,47,255,.08)', border: '1px solid rgba(123,47,255,.2)',
+                borderRadius: '6px', color: '#b07eff', cursor: 'pointer',
+                transition: 'all .12s',
+              }}>
+              🔗 Link Filters
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -471,33 +610,33 @@ function FilterCard({ item, onDelete, onManageServices, serviceCount, isSpecial,
 // ─────────────────────────────────────────────────────────
 export default function AdminManageFilters() {
 
-  // ── All services ──────────────────────────────────────
   const [allServices, setAllServices] = useState([]);
 
-  // ── Stage 1: Platforms ────────────────────────────────
+  // Stage 1: Platforms
   const [platforms,          setPlatforms]          = useState([]);
   const [platformServiceMap, setPlatformServiceMap] = useState({});
+  // platform_id → Set<service_type_id>  (which Stage 2 filters this platform shows)
+  const [platformServiceTypeMap, setPlatformServiceTypeMap] = useState({});
 
-  // ── Stage 2: Service Types ────────────────────────────
+  // Stage 2: Service Types
   const [serviceTypes,   setServiceTypes]   = useState([]);
   const [serviceTypeMap, setServiceTypeMap] = useState({});
+  // service_type_id → Set<filter_type_id>  (which Stage 3 filters this service type shows)
+  const [serviceTypeFilterTypeMap, setServiceTypeFilterTypeMap] = useState({});
 
-  // ── Stage 3: Filter Types ─────────────────────────────
+  // Stage 3: Filter Types
   const [filterTypes,   setFilterTypes]   = useState([]);
   const [filterTypeMap, setFilterTypeMap] = useState({});
 
-  // ── Custom prices ─────────────────────────────────────
+  // Custom prices
   const [customPrices, setCustomPrices] = useState({});
 
-  // ── ACTIVE SELECTION STATE ────────────────────────────
-  // These remember WHICH filter card the admin last tapped in each stage
-  // so the card stays highlighted (glowing border) even after the picker modal closes.
-  // This helps admin know their current context when moving between stages.
+  // Active selection state (for card highlighting)
   const [activePlatformId,    setActivePlatformId]    = useState(null);
   const [activeServiceTypeId, setActiveServiceTypeId] = useState(null);
   const [activeFilterTypeId,  setActiveFilterTypeId]  = useState(null);
 
-  // ── UI ────────────────────────────────────────────────
+  // UI
   const [loading,      setLoading]      = useState(true);
   const [toast,        setToast]        = useState({ msg: '', type: 'success' });
   const [searchStage1, setSearchStage1] = useState('');
@@ -505,6 +644,8 @@ export default function AdminManageFilters() {
   const [searchStage3, setSearchStage3] = useState('');
   const [addModal,     setAddModal]     = useState(null);
   const [pickerModal,  setPickerModal]  = useState(null);
+  // linkerModal: { stage, item } — for linking Stage 2 to Stage 1, or Stage 3 to Stage 2
+  const [linkerModal,  setLinkerModal]  = useState(null);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -515,16 +656,14 @@ export default function AdminManageFilters() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      // Load ALL services — paginate in batches to handle 2500+
+      // All services
       const BATCH = 1000;
-      let allSvc  = [];
-      let from    = 0;
+      let allSvc = [];
+      let from   = 0;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const { data, error } = await supabase
-          .from('services')
-          .select('*')
-          .eq('is_active', true)
+          .from('services').select('*').eq('is_active', true)
           .order('created_at', { ascending: false })
           .range(from, from + BATCH - 1);
         if (error) throw error;
@@ -535,49 +674,89 @@ export default function AdminManageFilters() {
       }
       setAllServices(allSvc);
 
-      // Stage 1
+      // ── Helper: fetch ALL rows from a junction table with no row-count limit ──
+      // Supabase default cap is 1000 rows per request. This loops until done.
+      const fetchAll = async (table, selectCols = '*') => {
+        const JB = 100000; // batch size — larger = fewer round trips
+        let rows = [];
+        let f    = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { data, error } = await supabase
+            .from(table).select(selectCols).range(f, f + JB - 1);
+          if (error) throw error;
+          if (!data || data.length === 0) break;
+          rows = [...rows, ...data];
+          if (data.length < JB) break;
+          f += JB;
+        }
+        return rows;
+      };
+
+      // Stage 1: platforms (small table — no pagination needed)
       const { data: plats } = await supabase
         .from('filter_platforms').select('*').order('sort_order').order('created_at');
       setPlatforms(plats || []);
 
-      const { data: platSvc } = await supabase.from('filter_platform_services').select('*');
+      // platform → services  (can exceed 1000 rows with many services)
+      const platSvc = await fetchAll('filter_platform_services');
       const pm = {};
-      (platSvc || []).forEach(r => {
+      platSvc.forEach(r => {
         if (!pm[r.platform_id]) pm[r.platform_id] = new Set();
         pm[r.platform_id].add(r.service_id);
       });
       setPlatformServiceMap(pm);
 
-      // Stage 2
+      // platform → linked service types (Stage 1 → Stage 2 direct links)
+      const platStLinks = await fetchAll('filter_platform_service_types');
+      const pstm = {};
+      platStLinks.forEach(r => {
+        if (!pstm[r.platform_id]) pstm[r.platform_id] = new Set();
+        pstm[r.platform_id].add(r.service_type_id);
+      });
+      setPlatformServiceTypeMap(pstm);
+
+      // Stage 2: service types (small table — no pagination needed)
       const { data: svcTypes } = await supabase
         .from('filter_service_types').select('*').order('sort_order').order('created_at');
       setServiceTypes(svcTypes || []);
 
-      const { data: svcTypeSvc } = await supabase.from('filter_service_type_services').select('*');
+      // service type → services  (can exceed 1000 rows)
+      const svcTypeSvc = await fetchAll('filter_service_type_services');
       const stm = {};
-      (svcTypeSvc || []).forEach(r => {
+      svcTypeSvc.forEach(r => {
         if (!stm[r.service_type_id]) stm[r.service_type_id] = new Set();
         stm[r.service_type_id].add(r.service_id);
       });
       setServiceTypeMap(stm);
 
-      // Stage 3
+      // service type → linked filter types (Stage 2 → Stage 3 direct links)
+      const stFtLinks = await fetchAll('filter_service_type_filter_types');
+      const stftm = {};
+      stFtLinks.forEach(r => {
+        if (!stftm[r.service_type_id]) stftm[r.service_type_id] = new Set();
+        stftm[r.service_type_id].add(r.filter_type_id);
+      });
+      setServiceTypeFilterTypeMap(stftm);
+
+      // Stage 3: filter types (small table — no pagination needed)
       const { data: ftypes } = await supabase
         .from('filter_types').select('*').order('sort_order').order('created_at');
       setFilterTypes(ftypes || []);
 
-      const { data: ftypeSvc } = await supabase.from('filter_type_services').select('*');
+      // filter type → services  (can exceed 1000 rows)
+      const ftypeSvc = await fetchAll('filter_type_services');
       const ftm = {};
-      (ftypeSvc || []).forEach(r => {
+      ftypeSvc.forEach(r => {
         if (!ftm[r.filter_type_id]) ftm[r.filter_type_id] = new Set();
         ftm[r.filter_type_id].add(r.service_id);
       });
       setFilterTypeMap(ftm);
 
-      // Custom prices
-      const { data: prices } = await supabase.from('service_custom_prices').select('*');
+      // Custom prices (can exceed 1000 rows)
+      const priceRows = await fetchAll('service_custom_prices');
       const cp = {};
-      (prices || []).forEach(r => { cp[r.service_id] = r.custom_price; });
+      priceRows.forEach(r => { cp[r.service_id] = r.custom_price; });
       setCustomPrices(cp);
 
     } catch (e) {
@@ -634,29 +813,21 @@ export default function AdminManageFilters() {
     }
   };
 
-  // ── Open service picker ───────────────────────────────
-  // Also sets the active selection for the tapped stage so the card stays highlighted
+  // ── Open service picker (links services to a filter) ──
   const openPicker = (stage, item) => {
     let poolServices  = [];
     let alreadyLinked = new Set();
 
     if (stage === 1) {
-      // Set stage 1 active — stays highlighted so admin knows context when going to stage 2
       setActivePlatformId(item.id);
       poolServices  = allServices;
       alreadyLinked = platformServiceMap[item.id] || new Set();
-
     } else if (stage === 2) {
-      // Set stage 2 active
       setActiveServiceTypeId(item.id);
-      // Pool = services already added to the CURRENTLY ACTIVE platform filter
-      // If admin has an active platform selected, show only those services
-      // Otherwise show all services that exist in any platform filter
       if (activePlatformId && platformServiceMap[activePlatformId]) {
         const allowedIds = platformServiceMap[activePlatformId];
         poolServices = allServices.filter(s => allowedIds.has(s.id));
       } else {
-        // Fallback: show all services that belong to ANY platform filter
         const platformLinkedIds = new Set();
         Object.values(platformServiceMap).forEach(set => set.forEach(id => platformLinkedIds.add(id)));
         poolServices = platformLinkedIds.size > 0
@@ -664,13 +835,8 @@ export default function AdminManageFilters() {
           : allServices;
       }
       alreadyLinked = serviceTypeMap[item.id] || new Set();
-
     } else if (stage === 3) {
-      // Set stage 3 active
       setActiveFilterTypeId(item.id);
-      // Pool = services already added to the CURRENTLY ACTIVE service type filter
-      // If admin has an active service type selected, show only those services
-      // Otherwise show all services that belong to ANY service type filter
       if (activeServiceTypeId && serviceTypeMap[activeServiceTypeId]) {
         const allowedIds = serviceTypeMap[activeServiceTypeId];
         poolServices = allServices.filter(s => allowedIds.has(s.id));
@@ -687,43 +853,84 @@ export default function AdminManageFilters() {
     setPickerModal({ stage, item, poolServices, alreadyLinked });
   };
 
+  // ── Open filter linker ────────────────────────────────
+  // stage=1 → link Stage 2 service types to this platform
+  // stage=2 → link Stage 3 filter types to this service type
+  const openLinker = (stage, item) => {
+    if (stage === 1) {
+      setActivePlatformId(item.id);
+      setLinkerModal({ stage: 1, item });
+    } else if (stage === 2) {
+      setActiveServiceTypeId(item.id);
+      setLinkerModal({ stage: 2, item });
+    }
+  };
+
   // ── Save service associations ─────────────────────────
   const handleSaveServices = async (addedIds, removedIds) => {
     const { stage, item } = pickerModal;
     try {
       if (stage === 1) {
-        if (removedIds.length > 0) {
-          await supabase.from('filter_platform_services')
-            .delete().eq('platform_id', item.id).in('service_id', removedIds);
-        }
-        if (addedIds.length > 0) {
-          const rows = addedIds.map(sid => ({ platform_id: item.id, service_id: sid }));
-          await supabase.from('filter_platform_services')
-            .upsert(rows, { onConflict: 'platform_id,service_id' });
-        }
+        if (removedIds.length > 0)
+          await supabase.from('filter_platform_services').delete().eq('platform_id', item.id).in('service_id', removedIds);
+        if (addedIds.length > 0)
+          await supabase.from('filter_platform_services').upsert(
+            addedIds.map(sid => ({ platform_id: item.id, service_id: sid })),
+            { onConflict: 'platform_id,service_id' }
+          );
       } else if (stage === 2) {
-        if (removedIds.length > 0) {
-          await supabase.from('filter_service_type_services')
-            .delete().eq('service_type_id', item.id).in('service_id', removedIds);
-        }
-        if (addedIds.length > 0) {
-          const rows = addedIds.map(sid => ({ service_type_id: item.id, service_id: sid }));
-          await supabase.from('filter_service_type_services')
-            .upsert(rows, { onConflict: 'service_type_id,service_id' });
-        }
+        if (removedIds.length > 0)
+          await supabase.from('filter_service_type_services').delete().eq('service_type_id', item.id).in('service_id', removedIds);
+        if (addedIds.length > 0)
+          await supabase.from('filter_service_type_services').upsert(
+            addedIds.map(sid => ({ service_type_id: item.id, service_id: sid })),
+            { onConflict: 'service_type_id,service_id' }
+          );
       } else if (stage === 3) {
-        if (removedIds.length > 0) {
-          await supabase.from('filter_type_services')
-            .delete().eq('filter_type_id', item.id).in('service_id', removedIds);
-        }
-        if (addedIds.length > 0) {
-          const rows = addedIds.map(sid => ({ filter_type_id: item.id, service_id: sid }));
-          await supabase.from('filter_type_services')
-            .upsert(rows, { onConflict: 'filter_type_id,service_id' });
-        }
+        if (removedIds.length > 0)
+          await supabase.from('filter_type_services').delete().eq('filter_type_id', item.id).in('service_id', removedIds);
+        if (addedIds.length > 0)
+          await supabase.from('filter_type_services').upsert(
+            addedIds.map(sid => ({ filter_type_id: item.id, service_id: sid })),
+            { onConflict: 'filter_type_id,service_id' }
+          );
       }
       showToast('Services saved!');
       setPickerModal(null);
+      await loadAll();
+    } catch (e) {
+      showToast('Error: ' + e.message, 'error');
+    }
+  };
+
+  // ── Save filter links (Stage 1→2 or Stage 2→3) ───────
+  const handleSaveFilterLinks = async (addedIds, removedIds) => {
+    const { stage, item } = linkerModal;
+    try {
+      if (stage === 1) {
+        // Link service types to this platform
+        if (removedIds.length > 0)
+          await supabase.from('filter_platform_service_types')
+            .delete().eq('platform_id', item.id).in('service_type_id', removedIds);
+        if (addedIds.length > 0)
+          await supabase.from('filter_platform_service_types').upsert(
+            addedIds.map(stid => ({ platform_id: item.id, service_type_id: stid })),
+            { onConflict: 'platform_id,service_type_id' }
+          );
+        showToast(`Stage 2 filters linked to "${item.name}"! Marketplace will now show only these service types when user selects this platform.`);
+      } else if (stage === 2) {
+        // Link filter types to this service type
+        if (removedIds.length > 0)
+          await supabase.from('filter_service_type_filter_types')
+            .delete().eq('service_type_id', item.id).in('filter_type_id', removedIds);
+        if (addedIds.length > 0)
+          await supabase.from('filter_service_type_filter_types').upsert(
+            addedIds.map(ftid => ({ service_type_id: item.id, filter_type_id: ftid })),
+            { onConflict: 'service_type_id,filter_type_id' }
+          );
+        showToast(`Stage 3 filters linked to "${item.name}"! Marketplace will now show only these filter types when user selects this service type.`);
+      }
+      setLinkerModal(null);
       await loadAll();
     } catch (e) {
       showToast('Error: ' + e.message, 'error');
@@ -743,21 +950,20 @@ export default function AdminManageFilters() {
       const cp = {};
       (prices || []).forEach(r => { cp[r.service_id] = r.custom_price; });
       setCustomPrices(cp);
-      showToast('Custom prices saved! Marketplace will use these prices.');
+      showToast('Custom prices saved!');
     } catch (e) {
       showToast('Error saving prices: ' + e.message, 'error');
     }
   };
 
-  // ── Search filtered cards ─────────────────────────────
-  const filteredPlatforms    = platforms.filter(p =>    !searchStage1 || p.name.toLowerCase().includes(searchStage1.toLowerCase()));
+  // ── Filtered search results ───────────────────────────
+  const filteredPlatforms    = platforms.filter(p    => !searchStage1 || p.name.toLowerCase().includes(searchStage1.toLowerCase()));
   const filteredServiceTypes = serviceTypes.filter(st => !searchStage2 || st.name.toLowerCase().includes(searchStage2.toLowerCase()));
-  const filteredFilterTypes  = filterTypes.filter(ft =>  !searchStage3 || ft.name.toLowerCase().includes(searchStage3.toLowerCase()));
+  const filteredFilterTypes  = filterTypes.filter(ft  => !searchStage3 || ft.name.toLowerCase().includes(searchStage3.toLowerCase()));
 
-  // Active item names for the context banner
-  const activePlatform    = platforms.find(p  => p.id  === activePlatformId);
-  const activeServiceType = serviceTypes.find(s => s.id === activeServiceTypeId);
-  const activeFilterType  = filterTypes.find(f  => f.id === activeFilterTypeId);
+  const activePlatform    = platforms.find(p    => p.id === activePlatformId);
+  const activeServiceType = serviceTypes.find(s  => s.id === activeServiceTypeId);
+  const activeFilterType  = filterTypes.find(f   => f.id === activeFilterTypeId);
 
   // ─────────────────────────────────────────────────────
   // RENDER
@@ -788,30 +994,33 @@ export default function AdminManageFilters() {
           <div>
             <div style={{ fontWeight: 800, fontSize: '16px', color: 'var(--text)' }}>Manage Filters</div>
             <div style={{ fontSize: '10px', color: 'var(--text3)' }}>
-              Control what users see in the Marketplace — 3 stages of filtering
+              Control exactly what users see at each stage of marketplace filtering
             </div>
           </div>
         </div>
+
+        {/* How it works explanation */}
         <div style={{
-          padding: '10px 14px', borderRadius: '8px', marginTop: '8px',
+          padding: '12px 14px', borderRadius: '8px', marginTop: '8px',
           background: 'rgba(0,212,255,.04)', border: '1px solid rgba(0,212,255,.15)',
-          fontSize: '11px', color: 'var(--text3)', lineHeight: 1.7,
+          fontSize: '11px', color: 'var(--text3)', lineHeight: 1.8,
         }}>
-          <strong style={{ color: 'var(--neon)' }}>How it works:</strong>&nbsp;
-          User clicks a <strong style={{ color: 'var(--text)' }}>Platform</strong> →
-          picks a <strong style={{ color: 'var(--text)' }}>Service Type</strong> →
-          picks a <strong style={{ color: 'var(--text)' }}>Filter Type</strong>.
-          &nbsp;·&nbsp;
-          <strong style={{ color: 'var(--gold)' }}>Tap a card</strong> to manage its services.
-          &nbsp;·&nbsp;
-          <strong style={{ color: 'var(--gold)' }}>Hover a card</strong> to delete it.
-          &nbsp;·&nbsp;
-          <strong style={{ color: 'var(--neon)' }}>{allServices.length.toLocaleString()} services loaded.</strong>
+          <strong style={{ color: 'var(--neon)', display: 'block', marginBottom: '4px' }}>
+            🔗 How Filter Linking Works:
+          </strong>
+          <strong style={{ color: 'var(--text)' }}>Stage 1</strong> (Platform) →
+          click <span style={{ color: '#b07eff', fontWeight: 700 }}>🔗 Link Filters</span> on a platform card
+          to choose which <strong style={{ color: 'var(--text)' }}>Stage 2</strong> service types appear when that platform is selected.
+          <br/>
+          <strong style={{ color: 'var(--text)' }}>Stage 2</strong> (Service Type) →
+          click <span style={{ color: '#b07eff', fontWeight: 700 }}>🔗 Link Filters</span> on a service type card
+          to choose which <strong style={{ color: 'var(--text)' }}>Stage 3</strong> filter types appear when that service type is selected.
+          <br/>
+          <span style={{ color: 'var(--gold)', fontWeight: 700 }}>📋 Services</span> button on any card → assign which actual services belong to that filter.
         </div>
       </div>
 
-      {/* ─── ACTIVE CONTEXT BANNER ─────────────────────── */}
-      {/* Shows admin their current selection chain so they always know their context */}
+      {/* Active context banner */}
       {(activePlatform || activeServiceType || activeFilterType) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap',
@@ -830,9 +1039,7 @@ export default function AdminManageFilters() {
               {activePlatform.icon} {activePlatform.name}
             </span>
           )}
-          {activePlatform && activeServiceType && (
-            <span style={{ color: 'var(--text3)' }}>→</span>
-          )}
+          {activePlatform && activeServiceType && <span style={{ color: 'var(--text3)' }}>→</span>}
           {activeServiceType && (
             <span style={{
               padding: '3px 10px', borderRadius: '10px', fontWeight: 700,
@@ -842,9 +1049,7 @@ export default function AdminManageFilters() {
               {activeServiceType.icon} {activeServiceType.name}
             </span>
           )}
-          {activeServiceType && activeFilterType && (
-            <span style={{ color: 'var(--text3)' }}>→</span>
-          )}
+          {activeServiceType && activeFilterType && <span style={{ color: 'var(--text3)' }}>→</span>}
           {activeFilterType && (
             <span style={{
               padding: '3px 10px', borderRadius: '10px', fontWeight: 700,
@@ -865,11 +1070,16 @@ export default function AdminManageFilters() {
 
       {/* ═══════════════════════════════════════════════ */}
       {/* STAGE 1: SELECT PLATFORM                        */}
+      {/* Each card has: 📋 Services + 🔗 Link Filters    */}
+      {/* Link Filters → choose which Stage 2 appear      */}
       {/* ═══════════════════════════════════════════════ */}
       <div style={{ marginBottom: '28px' }}>
         <div className="st">
           <StageBadge label="Stage 1" color="#00d4ff" />
           &nbsp; Select Platform
+          <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, marginLeft: '8px' }}>
+            — use 🔗 Link Filters to control which Stage 2 options appear per platform
+          </span>
         </div>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
           <input className="srch-inp" style={{ flex: 1 }}
@@ -880,7 +1090,7 @@ export default function AdminManageFilters() {
             style={{ flexShrink: 0, padding: '8px 16px', fontSize: '18px', lineHeight: 1 }}
             title="Add new platform filter">+</button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
           {filteredPlatforms.map(item => (
             <FilterCard
               key={item.id}
@@ -888,8 +1098,10 @@ export default function AdminManageFilters() {
               isSpecial={item.slug === 'everything'}
               isActive={item.id === activePlatformId}
               serviceCount={item.slug === 'everything' ? null : (platformServiceMap[item.id]?.size || 0)}
+              linkedCount={item.slug === 'everything' ? null : (platformServiceTypeMap[item.id]?.size || 0)}
               onDelete={it => handleDeleteFilter(1, it)}
-              onManageServices={it => openPicker(1, it)}
+              onManageServices={item.slug === 'everything' ? null : it => openPicker(1, it)}
+              onLinkFilters={item.slug === 'everything' ? null : it => openLinker(1, it)}
             />
           ))}
         </div>
@@ -897,14 +1109,19 @@ export default function AdminManageFilters() {
 
       {/* ═══════════════════════════════════════════════ */}
       {/* STAGE 2: SELECT SERVICE TYPE                    */}
+      {/* Each card has: 📋 Services + 🔗 Link Filters    */}
+      {/* Link Filters → choose which Stage 3 appear      */}
       {/* ═══════════════════════════════════════════════ */}
       <div style={{ marginBottom: '28px' }}>
         <div className="st">
           <StageBadge label="Stage 2" color="#7b2fff" />
           &nbsp; Select Service
+          <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, marginLeft: '8px' }}>
+            — use 🔗 Link Filters to control which Stage 3 options appear per service type
+          </span>
           {activePlatform && (
             <span style={{ fontSize: '9px', color: 'var(--text3)', fontWeight: 400, marginLeft: '8px' }}>
-              — showing services for {activePlatform.icon} {activePlatform.name}
+              · active context: {activePlatform.icon} {activePlatform.name}
             </span>
           )}
         </div>
@@ -919,7 +1136,7 @@ export default function AdminManageFilters() {
               borderRadius: '7px', cursor: 'pointer' }}
             title="Add new service type filter">+</button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
           {filteredServiceTypes.map(item => (
             <FilterCard
               key={item.id}
@@ -927,8 +1144,10 @@ export default function AdminManageFilters() {
               isSpecial={item.slug === 'all'}
               isActive={item.id === activeServiceTypeId}
               serviceCount={item.slug === 'all' ? null : (serviceTypeMap[item.id]?.size || 0)}
+              linkedCount={item.slug === 'all' ? null : (serviceTypeFilterTypeMap[item.id]?.size || 0)}
               onDelete={it => handleDeleteFilter(2, it)}
-              onManageServices={it => openPicker(2, it)}
+              onManageServices={item.slug === 'all' ? null : it => openPicker(2, it)}
+              onLinkFilters={item.slug === 'all' ? null : it => openLinker(2, it)}
             />
           ))}
         </div>
@@ -936,6 +1155,8 @@ export default function AdminManageFilters() {
 
       {/* ═══════════════════════════════════════════════ */}
       {/* STAGE 3: FILTER BY TYPE                         */}
+      {/* Only 📋 Services button here — Stage 3 is the  */}
+      {/* last stage, nothing to link forward to          */}
       {/* ═══════════════════════════════════════════════ */}
       <div style={{ marginBottom: '28px' }}>
         <div className="st">
@@ -966,8 +1187,10 @@ export default function AdminManageFilters() {
               isSpecial={item.slug === 'all'}
               isActive={item.id === activeFilterTypeId}
               serviceCount={item.slug === 'all' ? null : (filterTypeMap[item.id]?.size || 0)}
+              linkedCount={null}
               onDelete={it => handleDeleteFilter(3, it)}
-              onManageServices={it => openPicker(3, it)}
+              onManageServices={item.slug === 'all' ? null : it => openPicker(3, it)}
+              onLinkFilters={null}
             />
           ))}
         </div>
@@ -983,8 +1206,7 @@ export default function AdminManageFilters() {
             <strong style={{ color: 'var(--gold)' }}>
               {Object.keys(customPrices).length} service{Object.keys(customPrices).length !== 1 ? 's' : ''}
             </strong> have custom prices set.
-            These override the default price and global markup in Settings.
-            Open any filter card → Prices tab to edit or clear them.
+            Open any filter card → 📋 Services → Prices tab to edit.
           </div>
         </div>
       )}
@@ -1018,6 +1240,31 @@ export default function AdminManageFilters() {
           onClose={() => setPickerModal(null)}
           customPrices={customPrices}
           onSavePrices={handleSavePrices}
+        />
+      )}
+
+      {/* FILTER LINKER MODAL */}
+      {linkerModal && linkerModal.stage === 1 && (
+        <FilterLinkerModal
+          title={`🔗 Link Stage 2 Filters → "${linkerModal.item.name}"`}
+          subtitle={`Choose which "Select Service" options appear when user clicks "${linkerModal.item.name}" in Stage 1`}
+          allItems={serviceTypes.filter(st => st.slug !== 'all')}
+          linked={platformServiceTypeMap[linkerModal.item.id] || new Set()}
+          itemColor="#7b2fff"
+          onSave={handleSaveFilterLinks}
+          onClose={() => setLinkerModal(null)}
+        />
+      )}
+
+      {linkerModal && linkerModal.stage === 2 && (
+        <FilterLinkerModal
+          title={`🔗 Link Stage 3 Filters → "${linkerModal.item.name}"`}
+          subtitle={`Choose which "Filter by Type" options appear when user clicks "${linkerModal.item.name}" in Stage 2`}
+          allItems={filterTypes.filter(ft => ft.slug !== 'all')}
+          linked={serviceTypeFilterTypeMap[linkerModal.item.id] || new Set()}
+          itemColor="#ffd700"
+          onSave={handleSaveFilterLinks}
+          onClose={() => setLinkerModal(null)}
         />
       )}
     </div>
