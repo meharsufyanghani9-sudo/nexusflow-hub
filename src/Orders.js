@@ -4,7 +4,7 @@ import { useCurrency } from './CurrencyContext';
 
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
 
-// ─── How many rows to show per page ──────────────────────────────────────────
+/// ─── How many rows to show per page ──────────────────────────────────────────
 const PAGE_SIZE = 20;
 
 // ─── Shimmer skeleton — reused for stats cards and table rows ─────────────────
