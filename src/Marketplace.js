@@ -151,7 +151,9 @@ export default function Marketplace({ user, onNav }) {
     try {
       // ── Helper: fetch ALL rows from any table without hitting
       // Supabase's default 1000-row cap per request ──────────
-      const fetchAll = async (table, cols = '*') => {
+      // optional=true: table may not exist yet (SQL migration not run)
+      // — returns [] silently instead of crashing the whole marketplace
+      const fetchAll = async (table, cols = '*', optional = false) => {
         const JB = 100000;
         let rows = [];
         let f    = 0;
@@ -159,7 +161,10 @@ export default function Marketplace({ user, onNav }) {
         while (true) {
           const { data, error } = await supabase
             .from(table).select(cols).range(f, f + JB - 1);
-          if (error) throw error;
+          if (error) {
+            if (optional) return [];
+            throw error;
+          }
           if (!data || data.length === 0) break;
           rows = [...rows, ...data];
           if (data.length < JB) break;
@@ -207,7 +212,8 @@ export default function Marketplace({ user, onNav }) {
       setPlatformServiceMap(pm);
 
       // platform → directly linked service types (admin-controlled Stage 1→2)
-      const platStRows = await fetchAll('filter_platform_service_types');
+      // optional=true: won't crash if SQL migration not run yet
+      const platStRows = await fetchAll('filter_platform_service_types', '*', true);
       const pstm = {};
       platStRows.forEach(r => {
         if (!pstm[r.platform_id]) pstm[r.platform_id] = new Set();
@@ -234,7 +240,8 @@ export default function Marketplace({ user, onNav }) {
       setServiceTypeMap(stm);
 
       // service type → directly linked filter types (admin-controlled Stage 2→3)
-      const stFtRows = await fetchAll('filter_service_type_filter_types');
+      // optional=true: won't crash if SQL migration not run yet
+      const stFtRows = await fetchAll('filter_service_type_filter_types', '*', true);
       const stftm = {};
       stFtRows.forEach(r => {
         if (!stftm[r.service_type_id]) stftm[r.service_type_id] = new Set();
@@ -727,8 +734,8 @@ export default function Marketplace({ user, onNav }) {
 
           {/* ── STAGE 2: SELECT SERVICE TYPE ────────────── */}
           {/* Round pill style, FIXED (wrapped, not scrollable) */}
-          {/* Shown only when relevant service types exist      */}
-          {relevantServiceTypes.length > 0 && (
+          {/* Always shown as long as service types exist in DB  */}
+          {filterServiceTypes.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
               <div style={{
                 fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
@@ -783,8 +790,8 @@ export default function Marketplace({ user, onNav }) {
 
           {/* ── STAGE 3: FILTER BY TYPE ─────────────────── */}
           {/* Round pill style, FIXED (wrapped, not scrollable) */}
-          {/* Shown only when relevant filter types exist       */}
-          {relevantFilterTypes.length > 0 && (
+          {/* Always shown as long as filter types exist in DB  */}
+          {filterTypes.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
               <div style={{
                 fontSize: '9px', color: 'var(--text3)', textTransform: 'uppercase',
