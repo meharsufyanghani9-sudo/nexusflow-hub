@@ -20,6 +20,7 @@ async function generateUniqueUsername(baseName) {
 
 export default function Auth({ onLogin, defaultTab }) {
   const [tab, setTab] = useState(defaultTab || 'login');
+  // If App.js detected a recovery hash and passed defaultTab='recovery', show reset form immediately
 
   // Login fields
   const [loginId,   setLoginId]   = useState('');
@@ -44,7 +45,7 @@ export default function Auth({ onLogin, defaultTab }) {
   const [forgotSent,   setForgotSent]   = useState(false);
 
   // Password recovery (user clicked reset link from email)
-  const [isRecovery,    setIsRecovery]    = useState(false);
+  const [isRecovery,    setIsRecovery]    = useState(defaultTab === 'recovery');
   const [newPassword,   setNewPassword]   = useState('');
   const [newPassword2,  setNewPassword2]  = useState('');
   const [recoverySaved, setRecoverySaved] = useState(false);
@@ -296,7 +297,7 @@ export default function Auth({ onLogin, defaultTab }) {
     if (!forgotEmail) { setError('Enter your email'); return; }
     setLoading(true);
     const { error: err } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-      redirectTo: window.location.origin,
+      redirectTo: window.location.origin + '/?reset=1',
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
