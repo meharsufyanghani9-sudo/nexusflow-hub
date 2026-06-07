@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
+// REFACTOR Phase-15: pageTitles centralised — no longer duplicated here and in App.js
+import { pageTitles } from './navigation';
 
 export default function Topbar({ user, page, onNav, onLogout, onCurrency, onTheme, darkMode, setSbOpen }) {
   const [dropOpen, setDropOpen] = useState(false);
@@ -9,22 +11,12 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [ticketError, setTicketError] = useState(''); // FIX Phase-11
   const [whatsapp, setWhatsapp] = useState('');
   const [telegram, setTelegram] = useState('');
   const dropRef = useRef(null);
   const { format, currency } = useCurrency();
-
-  const pageTitles = {
-    dashboard: 'Dashboard', marketplace: 'Marketplace', orders: 'My Orders',
-    deposit: 'Add Funds', transactions: 'Transactions', referral: 'Referral & Earn',
-    tasks: 'Earn Tasks', profile: 'My Profile', services: 'Services',
-    earnings: 'Earnings', deposits: 'Manage Deposits', withdrawals: 'Withdrawals',
-    users: 'All Users', resellers: 'Resellers', api: 'API Import',
-    disputes: 'Disputes', settings: 'Settings', admintasks: 'Manage Tasks',
-    adminreferral: 'Referral Settings', support: 'Support Tickets',
-    currencies: 'Currency Rates', adminservices: 'Manage Services',
-    adminorders: 'Manage Orders', massemail: 'Mass Email',
-  };
+  // REFACTOR Phase-15: pageTitles now imported from ./navigation (removed local copy)
 
   useEffect(() => {
     const handleClick = (e) => {
@@ -56,14 +48,23 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
 
   const sendTicket = async () => {
     if (!subject || !message) { alert('Fill all fields'); return; }
+    setTicketError(''); // FIX Phase-11: clear any previous error
     setSending(true);
-    await supabase.from('support_tickets').insert({
+    // FIX Phase-11: destructure the error so a DB failure (RLS denial,
+    // missing column, network drop) is not silently swallowed — previously
+    // the UI always showed "✅ Ticket Submitted!" even on failure.
+    const { error: ticketErr } = await supabase.from('support_tickets').insert({
       user_id: user.id, user_name: user.name,
       user_email: user.email, subject, message, status: 'open',
     });
-    setSending(false); setSent(true);
+    setSending(false);
+    if (ticketErr) {
+      setTicketError('Failed to submit ticket. Please try again.');
+      return;
+    }
+    setSent(true);
     setSubject(''); setMessage('');
-    setTimeout(() => { setSent(false); setShowSupport(false); }, 2500);
+    setTimeout(() => { setSent(false); setShowSupport(false); setTicketError(''); }, 2500);
   };
 
   const roleColor = user.role === 'admin' ? 'var(--purple)' : user.role === 'reseller' ? 'var(--gold)' : 'var(--neon)';
@@ -78,7 +79,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
     { ic: '📊', lb: 'Transactions', fn: () => { onNav('transactions'); setDropOpen(false); } },
     { ic: '💱', lb: 'Change Currency', fn: () => { onCurrency(); setDropOpen(false); } },
     { ic: darkMode ? '☀️' : '🌙', lb: darkMode ? 'Light Mode' : 'Dark Mode', fn: () => { onTheme(); setDropOpen(false); } },
-    { ic: '🎧', lb: 'Support', fn: () => { setShowSupport(true); setDropOpen(false); } },
+    { ic: '🎧', lb: 'Support', fn: () => { setShowSupport(true); setTicketError(''); setDropOpen(false); } },
   ];
 
   // Format balance in current currency
@@ -221,7 +222,7 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
       )}
 
       {/* ── Support Floating Button ── */}
-      <button onClick={() => setShowSupport(true)} style={{
+      <button onClick={() => { setShowSupport(true); setTicketError(''); }} style={{
         position: 'fixed',
         bottom: `calc(var(--mnh) + 16px)`,
         right: '16px', width: '48px', height: '48px',
@@ -240,11 +241,11 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
 
       {/* ── Support Modal ── */}
       {showSupport && (
-        <div className="mlay" onClick={e => e.target.classList.contains('mlay') && setShowSupport(false)}>
+        <div className="mlay" onClick={e => e.target.classList.contains('mlay') && (setShowSupport(false), setTicketError(''))}>
           <div className="mbox">
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
               <div className="mttl">🎧 Contact Support</div>
-              <button onClick={() => setShowSupport(false)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => { setShowSupport(false); setTicketError(''); }} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
             {sent ? (
               <div style={{ textAlign: 'center', padding: '28px' }}>
@@ -286,6 +287,16 @@ export default function Topbar({ user, page, onNav, onLogout, onCurrency, onThem
                     value={message} onChange={e => setMessage(e.target.value)}
                     style={{ minHeight: '90px', resize: 'vertical', fontFamily: 'Rajdhani,sans-serif' }} />
                 </div>
+                {/* FIX Phase-11: show insert error so user knows the ticket was NOT saved */}
+                {ticketError && (
+                  <div style={{
+                    background: 'rgba(255,50,80,.08)', border: '1px solid rgba(255,50,80,.25)',
+                    borderRadius: '7px', padding: '9px 12px', color: '#ff6b6b',
+                    fontSize: '12px', fontWeight: 700, marginBottom: '10px',
+                  }}>
+                    ❌ {ticketError}
+                  </div>
+                )}
                 <button className="btn bp blg bw" onClick={sendTicket} disabled={sending}>
                   <span>{sending ? 'Sending...' : 'Submit Ticket'}</span><span>→</span>
                 </button>
