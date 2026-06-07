@@ -13,7 +13,7 @@ import { supabase } from './supabase';
 //   - Admin can reply multiple times until they click "Close Ticket".
 //   - Unread indicator for tickets with new user messages.
 
-export default function AdminSupport() {
+export default function AdminSupport({ user }) {
   const [tickets,     setTickets]     = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [filter,      setFilter]      = useState('open');
@@ -144,6 +144,24 @@ export default function AdminSupport() {
   };
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
+  // FIX Phase-19: component-level admin role guard — defence-in-depth on top
+  // of App.js routing. Prevents any admin page from rendering its content if
+  // the user object is missing or has a non-admin role (e.g. manipulated via
+  // React DevTools). Must come after all hook declarations (Rules of Hooks).
+  if (!user || user.role !== 'admin') {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛔</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800, letterSpacing: '2px' }}>
+          ACCESS DENIED
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>
+          Admin privileges required.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Stats */}
