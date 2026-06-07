@@ -46,6 +46,7 @@ export default function Marketplace({ user, onNav }) {
   // ── All services loaded from DB ───────────────────────
   const [services,  setServices]  = useState([]);
   const [loading,   setLoading]   = useState(true);
+  const [loadError, setLoadError] = useState(''); // FIX Phase-8: surfaces load failures in UI
 
   // ── Filter tables from DB ─────────────────────────────
   const [filterPlatforms,    setFilterPlatforms]    = useState([]);
@@ -148,17 +149,19 @@ export default function Marketplace({ user, onNav }) {
   // ─────────────────────────────────────────────────────
   const loadEverything = async () => {
     setLoading(true);
+    setLoadError(''); // FIX Phase-8: clear any previous error before each fresh load
     try {
       // ── Helper: fetch ALL rows from any table without hitting
       // Supabase's default 1000-row cap per request ──────────
       // optional=true: table may not exist yet (SQL migration not run)
       // — returns [] silently instead of crashing the whole marketplace
+      // FIX Phase-8: was while(true) — capped at MAX_ITER (100 × 100,000 = 10M rows)
       const fetchAll = async (table, cols = '*', optional = false) => {
-        const JB = 100000;
+        const JB       = 100000;
+        const MAX_ITER = 100;
         let rows = [];
         let f    = 0;
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
+        for (let iter = 0; iter < MAX_ITER; iter++) {
           const { data, error } = await supabase
             .from(table).select(cols).range(f, f + JB - 1);
           if (error) {
@@ -174,11 +177,12 @@ export default function Marketplace({ user, onNav }) {
       };
 
       // ── Services (active only, featured first) ────────────
-      const BATCH = 1000;
+      // FIX Phase-8: was while(true) — capped at MAX_PAGES (50 × 1000 = 50,000 services)
+      const BATCH     = 1000;
+      const MAX_PAGES = 50;
       let allSvc  = [];
       let from    = 0;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
+      for (let pg = 0; pg < MAX_PAGES; pg++) {
         const { data } = await supabase
           .from('services')
           .select('*')
@@ -274,7 +278,9 @@ export default function Marketplace({ user, onNav }) {
       setCustomPrices(cp);
 
     } catch (e) {
-      console.error('Marketplace load error:', e);
+      // FIX Phase-8: surface the error in the UI instead of leaking
+      // internal Supabase table/column details to the browser console.
+      setLoadError('Failed to load services. Please refresh the page.');
     }
     setLoading(false);
   };
@@ -425,7 +431,26 @@ export default function Marketplace({ user, onNav }) {
       return;
     }
     const totalCost = parseFloat(cost);
-    if (totalCost > user.balance) { setOrderError('Insufficient balance. Please add funds.'); return; }
+
+    // FIX Phase-3: Always fetch the live balance from DB before checking or
+    // deducting — the prop value (user.balance) is stale after any prior order,
+    // deposit approval, or admin edit that happened since the user logged in.
+    const { data: freshProfile, error: balFetchErr } = await supabase
+      .from('users')
+      .select('balance')
+      .eq('id', user.id)
+      .single();
+
+    if (balFetchErr || !freshProfile) {
+      setOrderError('Could not verify balance. Please refresh and try again.');
+      return;
+    }
+    const freshBalance = parseFloat(freshProfile.balance || 0);
+
+    if (totalCost > freshBalance) {
+      setOrderError('Insufficient balance. Please add funds.');
+      return;
+    }
 
     setOrdering(true);
     const orderRef = 'NF-' + Date.now();
@@ -445,7 +470,7 @@ export default function Marketplace({ user, onNav }) {
     if (orderErr) { setOrderError('Order failed: ' + orderErr.message); setOrdering(false); return; }
 
     await supabase.from('users')
-      .update({ balance: user.balance - totalCost })
+      .update({ balance: freshBalance - totalCost })
       .eq('id', user.id);
 
     await supabase.from('transactions').insert({
@@ -888,6 +913,31 @@ export default function Marketplace({ user, onNav }) {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════ */}
+      {/* LOAD ERROR STATE (FIX Phase-8)                   */}
+      {/* ════════════════════════════════════════════════ */}
+      {loadError && !loading && (
+        <div style={{
+          background:   'rgba(255,50,80,.08)',
+          border:       '1px solid rgba(255,50,80,.25)',
+          borderRadius: '10px',
+          padding:      '20px',
+          textAlign:    'center',
+          color:        '#ff6b6b',
+          marginBottom: '16px',
+        }}>
+          <div style={{ fontSize: '28px', marginBottom: '8px' }}>⚠️</div>
+          <div style={{ fontWeight: 700, marginBottom: '6px' }}>{loadError}</div>
+          <button
+            className="btn bgh bsm"
+            style={{ marginTop: '8px' }}
+            onClick={() => { setLoadError(''); loadEverything(); }}
+          >
+            Try Again
+          </button>
         </div>
       )}
 
