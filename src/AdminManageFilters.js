@@ -612,7 +612,7 @@ function FilterCard({ item, onDelete, onManageServices, onLinkFilters, serviceCo
 // ─────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────
-export default function AdminManageFilters() {
+export default function AdminManageFilters({ user }) {
 
   const [allServices, setAllServices] = useState([]);
 
@@ -661,12 +661,14 @@ export default function AdminManageFilters() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      // All services
-      const BATCH = 1000;
+      // All services — FIX Phase-7: was while(true) with no upper bound.
+      // Capped at MAX_PAGES (50 × 1000 = 50,000 services) so this can
+      // never hang indefinitely if Supabase returns unexpected data.
+      const BATCH     = 1000;
+      const MAX_PAGES = 50;
       let allSvc = [];
       let from   = 0;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
+      for (let pg = 0; pg < MAX_PAGES; pg++) {
         const { data, error } = await supabase
           .from('services').select('*').eq('is_active', true)
           .order('created_at', { ascending: false })
@@ -683,12 +685,14 @@ export default function AdminManageFilters() {
       // Supabase default cap is 1000 rows per request. This loops until done.
       // optional=true means the table may not exist yet (new tables added by migration)
       // — in that case we silently return [] instead of crashing the whole page.
+      // FIX Phase-7: was while(true) — capped at MAX_ITER (100 × 100,000 = 10M rows)
+      // to prevent an infinite loop if Supabase returns unexpected paginated data.
       const fetchAll = async (table, selectCols = '*', optional = false) => {
-        const JB = 100000; // batch size — larger = fewer round trips
+        const JB       = 100000; // batch size — larger = fewer round trips
+        const MAX_ITER = 100;    // hard cap: 100 × 100,000 = 10,000,000 rows max
         let rows = [];
         let f    = 0;
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
+        for (let iter = 0; iter < MAX_ITER; iter++) {
           const { data, error } = await supabase
             .from(table).select(selectCols).range(f, f + JB - 1);
           if (error) {
@@ -994,6 +998,24 @@ export default function AdminManageFilters() {
         <div style={{ fontSize: '32px', marginBottom: '10px' }}>⚙️</div>
         <div style={{ fontSize: '12px', letterSpacing: '2px' }}>
           Loading filter data... ({allServices.length} services so far)
+        </div>
+      </div>
+    );
+  }
+
+  // FIX Phase-19: component-level admin role guard — defence-in-depth on top
+  // of App.js routing. Prevents any admin page from rendering its content if
+  // the user object is missing or has a non-admin role (e.g. manipulated via
+  // React DevTools). Must come after all hook declarations (Rules of Hooks).
+  if (!user || user.role !== 'admin') {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛔</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800, letterSpacing: '2px' }}>
+          ACCESS DENIED
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>
+          Admin privileges required.
         </div>
       </div>
     );
