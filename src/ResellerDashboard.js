@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
+// REFACTOR Phase-24: badgeClass centralised in utils.js — removed local duplicate
+import { badgeClass } from './utils';
 
 export default function ResellerDashboard({ user, onNav }) {
   const [balance, setBalance] = useState(user.balance || 0);
@@ -69,12 +71,7 @@ export default function ResellerDashboard({ user, onNav }) {
     setLoading(false);
   };
 
-  const badgeClass = (s) => {
-    if (s === 'completed') return 'b-completed';
-    if (s === 'in_progress') return 'b-processing';
-    if (s === 'pending') return 'b-pending';
-    return 'b-rejected';
-  };
+  // badgeClass imported from ./utils (REFACTOR Phase-24)
 
   return (
     <div>
