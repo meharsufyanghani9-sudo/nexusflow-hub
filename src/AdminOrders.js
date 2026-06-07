@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
 
-export default function AdminOrders() {
+export default function AdminOrders({ user }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
@@ -17,18 +17,21 @@ export default function AdminOrders() {
 
   const loadOrders = async () => {
     setLoading(true);
-    // Batch loop past Supabase 1000-row limit
+    // Batch loop past Supabase 1000-row limit.
+    // FIX Phase-6: was while(true) with no upper bound — capped at MAX_PAGES
+    // (20 × 1000 = 20,000 orders) so the loop can never hang indefinitely.
     let allOrders = [];
     let from = 0;
-    const BATCH = 1000;
-    while (true) {
+    const BATCH     = 1000;
+    const MAX_PAGES = 20;
+    for (let page = 0; page < MAX_PAGES; page++) {
       const { data, error } = await supabase
         .from('orders').select('*')
         .order('created_at', { ascending: false })
         .range(from, from + BATCH - 1);
       if (error || !data || data.length === 0) break;
       allOrders = [...allOrders, ...data];
-      if (data.length < BATCH) break;
+      if (data.length < BATCH) break;   // Last page — no more rows
       from += BATCH;
     }
     // Enrich with user info (avoids FK join issues)
@@ -64,6 +67,30 @@ export default function AdminOrders() {
   const refundOrder = async (order) => {
     if (!window.confirm(`Refund $${parseFloat(order.cost || 0).toFixed(2)} and cancel order?`)) return;
     setUpdating(order.id);
+
+    // FIX Phase-10: re-fetch fresh order status from DB before any balance
+    // operation. Prevents double-refund if admin double-clicks the button or
+    // two admins act simultaneously on the same order.
+    const { data: freshOrder, error: freshErr } = await supabase
+      .from('orders')
+      .select('status')
+      .eq('id', order.id)
+      .single();
+
+    if (freshErr || !freshOrder) {
+      setMsg('❌ Could not verify order status. Please refresh.');
+      setUpdating(null);
+      return;
+    }
+
+    if (freshOrder.status === 'cancelled') {
+      setMsg('⚠️ Order is already cancelled. No refund issued.');
+      loadOrders();
+      setUpdating(null);
+      setTimeout(() => setMsg(''), 4000);
+      return;
+    }
+
     const { data: profile } = await supabase
       .from('users').select('balance').eq('id', order.user_id).single();
     if (profile) {
@@ -105,6 +132,24 @@ export default function AdminOrders() {
     completed: orders.filter(o => o.status === 'completed').length,
     revenue: orders.reduce((a, b) => a + parseFloat(b.cost || 0), 0),
   };
+
+  // FIX Phase-19: component-level admin role guard — defence-in-depth on top
+  // of App.js routing. Prevents any admin page from rendering its content if
+  // the user object is missing or has a non-admin role (e.g. manipulated via
+  // React DevTools). Must come after all hook declarations (Rules of Hooks).
+  if (!user || user.role !== 'admin') {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛔</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800, letterSpacing: '2px' }}>
+          ACCESS DENIED
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>
+          Admin privileges required.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
