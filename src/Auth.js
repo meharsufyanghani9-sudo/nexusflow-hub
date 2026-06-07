@@ -297,7 +297,7 @@ export default function Auth({ onLogin, defaultTab }) {
     if (!forgotEmail) { setError('Enter your email'); return; }
     setLoading(true);
     const { error: err } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-      redirectTo: window.location.origin + '/?reset=1',
+      redirectTo: window.location.origin,
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
