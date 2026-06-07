@@ -145,24 +145,29 @@ export default function App() {
     const hash   = window.location.hash;
     const params = new URLSearchParams(hash.replace(/^#/, ''));
     if (params.get('type') === 'recovery') {
-      // Supabase will exchange the token and fire PASSWORD_RECOVERY via
-      // onAuthStateChange. We just pre-set the correct screen/tab now so
-      // there is no flicker to the landing page first.
-      setScreen('auth');
-      setAuthTab('reset');
-      // Clean the hash from the URL bar so it doesn't confuse anything on reload
-      window.history.replaceState(null, '', window.location.pathname);
+      // FIX: Sign out any existing logged-in session first so the dashboard
+      // restore logic doesn't run and overwrite the reset screen.
+      // NOTE: replaceState runs AFTER a tick so Supabase's own hash-exchange
+      // (which fires synchronously on client init) has already read the token.
+      supabase.auth.signOut().finally(() => {
+        setUser(null);
+        setScreen('auth');
+        setAuthTab('reset');
+      });
 
-      // Still set up the auth listener so updateUser() works correctly
+      // Clean the hash after a short delay so Supabase JS has already parsed it
+      setTimeout(() => {
+        window.history.replaceState(null, '', window.location.pathname);
+      }, 500);
+
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
         async (event) => {
-          if (event === 'SIGNED_OUT') {
-            setUser(null); setScreen('landing');
-            setPage('dashboard'); setPageHistory(['dashboard']);
-          }
           if (event === 'PASSWORD_RECOVERY') {
-            setScreen('auth'); setAuthTab('reset');
+            // Token exchanged successfully — stay on reset screen
+            setScreen('auth');
+            setAuthTab('reset');
           }
+          // Ignore SIGNED_OUT (we triggered it) and any SIGNED_IN during recovery
         }
       );
       return () => subscription.unsubscribe();
