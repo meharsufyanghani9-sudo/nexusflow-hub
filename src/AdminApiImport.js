@@ -24,9 +24,15 @@ const mapPlatform = (cat = '') => {
   return 'custom';
 };
 
-const PROXY = 'https://ctbfovtqjwrxbepccthw.supabase.co/functions/v1/proxy';
+// FIX Phase-5: Use the local Vercel serverless function instead of the
+// hardcoded Supabase Edge Function URL. Benefits:
+//   1. All SSRF protection, domain allowlist, and rate limiting in
+//      api/proxy.js apply automatically — no separate Edge Function needed.
+//   2. No project-specific URL that breaks on migration or rename.
+//   3. No Authorization header required — the Vercel function is internal.
+const PROXY = '/api/proxy';
 
-export default function AdminApiImport() {
+export default function AdminApiImport({ user }) {
   const [tab, setTab] = useState('import');
   const [provider, setProvider] = useState('jap');
   const [apiKey, setApiKey] = useState('');
@@ -80,12 +86,11 @@ export default function AdminApiImport() {
     setMsg('');
 
     try {
-      // Use our proxy to bypass CORS
+      // Use our local Vercel proxy to bypass CORS (FIX Phase-5: no Auth header needed)
       const res = await fetch(PROXY, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer sb_publishable_CkIMpe2-IhDVV78lQz6LTA__7aObr2X',
         },
         body: JSON.stringify({
           url: apiUrl,
@@ -173,8 +178,14 @@ export default function AdminApiImport() {
   const saveApiKey = async () => {
     if (!newLabel || !genKey) { alert('Generate a key and enter a label'); return; }
     setSavingKey(true);
+    // FIX Phase-5: store user_id so keys can be attributed to their owner.
+    // PanelApi.js queries by user_id — without this, admin keys are orphaned
+    // and never visible to anyone via the panel API key page.
     await supabase.from('api_keys').insert({
-      label: newLabel, api_key: genKey, is_active: true
+      user_id:  user?.id || null,
+      label:    newLabel,
+      api_key:  genKey,
+      is_active: true,
     });
     setSavingKey(false);
     setNewLabel(''); setGenKey('');
