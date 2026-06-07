@@ -21,6 +21,12 @@ async function generateUniqueUsername(baseName) {
 export default function Auth({ onLogin, defaultTab }) {
   const [tab, setTab] = useState(defaultTab || 'login');
 
+  // FIX forgot-password: sync tab when the parent changes defaultTab
+  // (e.g. PASSWORD_RECOVERY event fires while Auth is already mounted)
+  useEffect(() => {
+    if (defaultTab) setTab(defaultTab);
+  }, [defaultTab]);
+
   // Login fields
   const [loginId,   setLoginId]   = useState('');
   const [password,  setPassword]  = useState('');
@@ -42,6 +48,11 @@ export default function Auth({ onLogin, defaultTab }) {
   const [showForgot,   setShowForgot]   = useState(false);
   const [forgotEmail,  setForgotEmail]  = useState('');
   const [forgotSent,   setForgotSent]   = useState(false);
+
+  // Reset password (after user clicks email link — PASSWORD_RECOVERY event)
+  const [resetPw,      setResetPw]      = useState('');
+  const [resetPwConf,  setResetPwConf]  = useState('');
+  const [resetDone,    setResetDone]    = useState(false);
 
   const [refCode, setRefCode] = useState('');
   useEffect(() => {
@@ -266,12 +277,36 @@ export default function Auth({ onLogin, defaultTab }) {
   const handleForgotPassword = async () => {
     if (!forgotEmail) { setError('Enter your email'); return; }
     setLoading(true);
+    // FIX forgot-password: use the canonical production URL as redirectTo so
+    // Supabase sends the correct link on both localhost and the deployed site.
+    // window.location.origin works on the deployed site but returns
+    // http://localhost:3000 in dev — both are fine as long as both are listed
+    // in Supabase Auth → URL Configuration → Redirect URLs.
     const { error: err } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-      redirectTo: window.location.origin,
+      redirectTo: window.location.origin + '/',
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
     setForgotSent(true);
+  };
+
+  // ── RESET PASSWORD (called after user clicks the email link) ───────────────
+  // Supabase fires PASSWORD_RECOVERY → App.js sets defaultTab='reset' →
+  // this view is shown. supabase.auth.updateUser() works because Supabase
+  // automatically sets the session from the URL hash on page load.
+  const handleResetPassword = async () => {
+    setError('');
+    if (!resetPw || !resetPwConf) { setError('Fill both fields'); return; }
+    if (resetPw.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (resetPw !== resetPwConf) { setError('Passwords do not match'); return; }
+    setLoading(true);
+    const { error: err } = await supabase.auth.updateUser({ password: resetPw });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    setResetDone(true);
+    setResetPw(''); setResetPwConf('');
+    // Auto-redirect to login after 2.5 seconds
+    setTimeout(() => { setTab('login'); setResetDone(false); }, 2500);
   };
 
   const UsernameIndicator = () => {
@@ -372,6 +407,15 @@ export default function Auth({ onLogin, defaultTab }) {
               onClick={() => { setTab('signup'); setError(''); setMsg(''); }}
             >Sign Up</button>
           </div>
+          {/* Hide tab bar on reset tab — user should only complete or cancel */}
+          {tab === 'reset' && (
+            <div style={{
+              textAlign: 'center', marginBottom: '14px',
+              fontSize: '13px', fontWeight: 800, color: 'var(--neon)', letterSpacing: '1px',
+            }}>
+              🔐 SET NEW PASSWORD
+            </div>
+          )}
 
           {msg && (
             <div style={{
@@ -500,6 +544,62 @@ export default function Auth({ onLogin, defaultTab }) {
               >
                 <span>{loading ? 'Creating...' : 'Create Account'}</span><span>✦</span>
               </button>
+            </div>
+          )}
+          {/* RESET PASSWORD TAB — shown after user clicks the password reset email link */}
+          {tab === 'reset' && (
+            <div>
+              {resetDone ? (
+                <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                  <div style={{ fontSize: '40px', marginBottom: '10px' }}>✅</div>
+                  <div style={{ color: 'var(--green)', fontWeight: 800, fontSize: '16px', marginBottom: '8px' }}>
+                    Password Updated!
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text2)' }}>Redirecting to login...</div>
+                </div>
+              ) : (
+                <>
+                  <div style={{
+                    background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.2)',
+                    borderRadius: '7px', padding: '10px 12px', fontSize: '12px',
+                    color: 'var(--text2)', marginBottom: '16px', lineHeight: 1.6,
+                  }}>
+                    🔐 Enter your new password below to complete the reset.
+                  </div>
+                  <div className="fi">
+                    <label className="fl">New Password</label>
+                    <input
+                      className="inp"
+                      type="password"
+                      placeholder="Minimum 8 characters"
+                      value={resetPw}
+                      onChange={e => setResetPw(e.target.value)}
+                    />
+                  </div>
+                  <div className="fi">
+                    <label className="fl">Confirm New Password</label>
+                    <input
+                      className="inp"
+                      type="password"
+                      placeholder="Repeat new password"
+                      value={resetPwConf}
+                      onChange={e => setResetPwConf(e.target.value)}
+                    />
+                  </div>
+                  <div className="aerr">{error}</div>
+                  <button className="btn bp blg bw" onClick={handleResetPassword} disabled={loading}>
+                    <span>{loading ? 'Saving...' : 'Set New Password'}</span><span>🔒</span>
+                  </button>
+                  <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                    <button
+                      onClick={() => { setTab('login'); setError(''); setResetPw(''); setResetPwConf(''); }}
+                      style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '12px' }}
+                    >
+                      ← Back to Login
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
