@@ -90,7 +90,7 @@ export default function LiveStats() {
     { ic: '🏪', lb: 'Resellers',      vl: stats.resellers, cl: 'cp',  suf: '+', dec: 0 },
     { ic: '🛍',  lb: 'Live Services',  vl: stats.services,  cl: 'cg',  suf: '',  dec: 0 },
     { ic: '✅', lb: 'Completed',      vl: stats.completed, cl: 'cg',  suf: '+', dec: 0 },
-    { ic: '💰', lb: 'Revenue Served', vl: stats.revenue,   cl: 'cgo', pre: '$', suf: '', dec: 2 },
+    //{ ic: '💰', lb: 'Revenue Served', vl: stats.revenue,   cl: 'cgo', pre: '$', suf: '', dec: 2 },
   ];
 
   return (
