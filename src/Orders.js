@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
+// REFACTOR Phase-24: badgeClass centralised in utils.js — removed local duplicate
+import { badgeClass } from './utils';
 
 const statusList = ['all', 'pending', 'in_progress', 'completed', 'cancelled'];
 
@@ -211,7 +213,13 @@ export default function Orders({ user }) {
     const newBalance   = parseFloat(profile.balance || 0) + refundAmount;
 
     await supabase.from('users').update({ balance: newBalance }).eq('id', user.id);
-    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id);
+    // FIX Phase-9: include .eq('user_id', user.id) so a user cannot cancel
+    // another user's order if they know the order UUID (defence-in-depth on
+    // top of Supabase RLS — both guards should be present).
+    await supabase.from('orders')
+      .update({ status: 'cancelled' })
+      .eq('id', order.id)
+      .eq('user_id', user.id);
     await supabase.from('transactions').insert({
       user_id:     user.id,
       type:        'refund',
@@ -227,7 +235,12 @@ export default function Orders({ user }) {
 
   const refillOrder = async (order) => {
     if (!window.confirm('Request a refill for this order?')) return;
-    await supabase.from('orders').update({ refill_requested: true }).eq('id', order.id);
+    // FIX Phase-9: include .eq('user_id', user.id) so only the order owner
+    // can request a refill — ownership enforced at query level.
+    await supabase.from('orders')
+      .update({ refill_requested: true })
+      .eq('id', order.id)
+      .eq('user_id', user.id);
     setActionMsg('✅ Refill requested! Admin will process it shortly.');
     loadOrders();
     setTimeout(() => setActionMsg(''), 4000);
@@ -246,12 +259,7 @@ export default function Orders({ user }) {
     completed: orders.filter(o => o.status === 'completed').length,
   };
 
-  const badgeClass = (s) => {
-    if (s === 'completed')   return 'b-completed';
-    if (s === 'in_progress') return 'b-processing';
-    if (s === 'pending')     return 'b-pending';
-    return 'b-rejected';
-  };
+  // badgeClass imported from ./utils (REFACTOR Phase-24)
 
   const statCards = [
     { ic: '📦', lb: 'Total',       vl: stats.total,     cl: 'cn' },
