@@ -135,9 +135,40 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // FIX #30: orphaned fire-and-forget warm-up query REMOVED from here.
-    // The getSession() call below already warms the Supabase connection.
+    // FIX forgot-password (final): Supabase appends #access_token=...&type=recovery
+    // to the URL when the user clicks a password-reset email link. We must check
+    // this hash BEFORE restoreSession() runs, because restoreSession() calls
+    // getSession() — which on a fresh load with no prior session returns null and
+    // sets screen='landing', racing against and overwriting the PASSWORD_RECOVERY
+    // event fired by onAuthStateChange. Checking the hash first lets us skip
+    // restoreSession entirely and go straight to the reset screen.
+    const hash   = window.location.hash;
+    const params = new URLSearchParams(hash.replace(/^#/, ''));
+    if (params.get('type') === 'recovery') {
+      // Supabase will exchange the token and fire PASSWORD_RECOVERY via
+      // onAuthStateChange. We just pre-set the correct screen/tab now so
+      // there is no flicker to the landing page first.
+      setScreen('auth');
+      setAuthTab('reset');
+      // Clean the hash from the URL bar so it doesn't confuse anything on reload
+      window.history.replaceState(null, '', window.location.pathname);
 
+      // Still set up the auth listener so updateUser() works correctly
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        async (event) => {
+          if (event === 'SIGNED_OUT') {
+            setUser(null); setScreen('landing');
+            setPage('dashboard'); setPageHistory(['dashboard']);
+          }
+          if (event === 'PASSWORD_RECOVERY') {
+            setScreen('auth'); setAuthTab('reset');
+          }
+        }
+      );
+      return () => subscription.unsubscribe();
+    }
+
+    // ── Normal (non-recovery) boot path ──────────────────────────────────────
     const restoreSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -178,9 +209,6 @@ export default function App() {
           setPageHistory(['dashboard']);
         }
         if (event === 'PASSWORD_RECOVERY') {
-          // FIX forgot-password: was setting authTab='login' which showed the
-          // login form — user had no way to type their new password.
-          // Now sets 'reset' so Auth.js shows the Set New Password form.
           setScreen('auth');
           setAuthTab('reset');
         }
