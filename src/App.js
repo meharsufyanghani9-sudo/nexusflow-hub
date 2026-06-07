@@ -135,45 +135,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // FIX forgot-password (final): Supabase appends #access_token=...&type=recovery
-    // to the URL when the user clicks a password-reset email link. We must check
-    // this hash BEFORE restoreSession() runs, because restoreSession() calls
-    // getSession() — which on a fresh load with no prior session returns null and
-    // sets screen='landing', racing against and overwriting the PASSWORD_RECOVERY
-    // event fired by onAuthStateChange. Checking the hash first lets us skip
-    // restoreSession entirely and go straight to the reset screen.
-    const hash   = window.location.hash;
-    const params = new URLSearchParams(hash.replace(/^#/, ''));
-    if (params.get('type') === 'recovery') {
-      // FIX: Sign out any existing logged-in session first so the dashboard
-      // restore logic doesn't run and overwrite the reset screen.
-      // NOTE: replaceState runs AFTER a tick so Supabase's own hash-exchange
-      // (which fires synchronously on client init) has already read the token.
-      supabase.auth.signOut().finally(() => {
-        setUser(null);
-        setScreen('auth');
-        setAuthTab('reset');
-      });
+    // FIX #30: orphaned fire-and-forget warm-up query REMOVED from here.
+    // The getSession() call below already warms the Supabase connection.
 
-      // Clean the hash after a short delay so Supabase JS has already parsed it
-      setTimeout(() => {
-        window.history.replaceState(null, '', window.location.pathname);
-      }, 500);
-
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        async (event) => {
-          if (event === 'PASSWORD_RECOVERY') {
-            // Token exchanged successfully — stay on reset screen
-            setScreen('auth');
-            setAuthTab('reset');
-          }
-          // Ignore SIGNED_OUT (we triggered it) and any SIGNED_IN during recovery
-        }
-      );
-      return () => subscription.unsubscribe();
-    }
-
-    // ── Normal (non-recovery) boot path ──────────────────────────────────────
     const restoreSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -215,7 +179,7 @@ export default function App() {
         }
         if (event === 'PASSWORD_RECOVERY') {
           setScreen('auth');
-          setAuthTab('reset');
+          setAuthTab('recovery');
         }
       }
     );
