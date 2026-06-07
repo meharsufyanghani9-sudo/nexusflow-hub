@@ -13,7 +13,7 @@ const empty = {
   provider_id: '', provider_service_id: '', provider_api_url: '', provider_api_key: '',
 };
 
-export default function AdminServices() {
+export default function AdminServices({ user }) {
   const [services,       setServices]       = useState([]);
   const [loading,        setLoading]        = useState(true);
   const [modal,          setModal]          = useState(false);
@@ -255,6 +255,24 @@ export default function AdminServices() {
       {!checked && indeterminate && <span style={{ fontSize: '10px', color: 'var(--neon)', fontWeight: 900, lineHeight: 1 }}>–</span>}
     </div>
   );
+
+  // FIX Phase-19: component-level admin role guard — defence-in-depth on top
+  // of App.js routing. Prevents any admin page from rendering its content if
+  // the user object is missing or has a non-admin role (e.g. manipulated via
+  // React DevTools). Must come after all hook declarations (Rules of Hooks).
+  if (!user || user.role !== 'admin') {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛔</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800, letterSpacing: '2px' }}>
+          ACCESS DENIED
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>
+          Admin privileges required.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
