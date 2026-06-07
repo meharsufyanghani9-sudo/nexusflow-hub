@@ -1,5 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-/
+
 :root {
   --bg0:#020408;--bg1:#060d18;--bg2:#0a1628;--bg3:#0d1e35;
   --neon:#00d4ff;--neon2:#0099ff;--gold:#ffd700;--gold2:#ffb800;
@@ -72,7 +72,7 @@ body::after{
 .inp:focus,.sel:focus{border-color:var(--neon);box-shadow:0 0 0 3px rgba(0,212,255,.1)}
 .sel{
   appearance:none;cursor:pointer;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2300d4ff' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%278%27%3E%3Cpath d=%27M1 1l5 5 5-5%27 stroke=%27%2300d4ff%27 stroke-width=%271.5%27 fill=%27none%27 stroke-linecap=%27round%27/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 12px center;padding-right:34px;
 }
 .sel option{background:var(--bg2)}
