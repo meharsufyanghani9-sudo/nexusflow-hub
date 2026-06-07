@@ -11,7 +11,7 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
-export default function AdminMassEmail() {
+export default function AdminMassEmail({ user }) {
   const [subject, setSubject]       = useState('');
   const [message, setMessage]       = useState('');
   const [sending, setSending]       = useState(false);
@@ -88,6 +88,24 @@ export default function AdminMassEmail() {
 
   const isSuccess = result.startsWith('✅');
   const isWarning = result.startsWith('⚠️');
+
+  // FIX Phase-19: component-level admin role guard — defence-in-depth on top
+  // of App.js routing. Prevents any admin page from rendering its content if
+  // the user object is missing or has a non-admin role (e.g. manipulated via
+  // React DevTools). Must come after all hook declarations (Rules of Hooks).
+  if (!user || user.role !== 'admin') {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛔</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800, letterSpacing: '2px' }}>
+          ACCESS DENIED
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>
+          Admin privileges required.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: '640px' }}>
