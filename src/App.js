@@ -139,6 +139,29 @@ export default function App() {
     // The getSession() call below already warms the Supabase connection.
 
     const restoreSession = async () => {
+      // ── FIX: Intercept password-recovery links BEFORE restoring session ──
+      // When the user clicks the reset-password link in their email, Supabase
+      // redirects back to the site with a URL hash like:
+      //   #access_token=...&type=recovery
+      // We must detect this FIRST — otherwise getSession() below finds a valid
+      // session and routes the user to the main app, bypassing the reset form.
+      // Check hash fragment: #access_token=...&type=recovery  (Supabase PKCE flow)
+      const hash = window.location.hash;
+      const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+      const isRecoveryHash = hashParams.get('type') === 'recovery';
+
+      // Check query param: ?reset=1  (set by our redirectTo as a backup signal)
+      const searchParams = new URLSearchParams(window.location.search);
+      const isRecoveryQuery = searchParams.get('reset') === '1';
+
+      if (isRecoveryHash || isRecoveryQuery) {
+        // Clean URL so a page refresh doesn't re-trigger
+        window.history.replaceState(null, '', window.location.pathname);
+        setScreen('auth');
+        setAuthTab('recovery');
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const { data: profile } = await supabase
