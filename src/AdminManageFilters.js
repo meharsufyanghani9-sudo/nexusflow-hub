@@ -56,6 +56,11 @@ function ServicePickerModal({
     return m;
   });
   const [savingPrices, setSavingPrices] = useState(false);
+  // FIX service-picker: paginate the list so the browser never has to render
+  // thousands of DOM nodes at once — with 1000+ services the previous
+  // filtered.map() caused the tab to freeze or crash completely.
+  const PICKER_PAGE = 50;
+  const [pickerPage, setPickerPage] = useState(1);
 
   const filtered = allServices.filter(s => {
     if (!search) return true;
@@ -64,6 +69,13 @@ function ServicePickerModal({
            (s.platform || '').toLowerCase().includes(q) ||
            String(s.provider_service_id || '').includes(q);
   });
+
+  // Reset to page 1 whenever search changes
+  const handleSearchChange = (val) => { setSearch(val); setPickerPage(1); };
+
+  // Only render the current page slice — select/deselect still tracks the FULL set
+  const visibleServices = filtered.slice(0, pickerPage * PICKER_PAGE);
+  const hasMoreToShow   = visibleServices.length < filtered.length;
 
   const toggle           = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAllVisible = () => setSelected(prev => { const n = new Set(prev); filtered.forEach(s => n.add(s.id)); return n; });
@@ -144,7 +156,7 @@ function ServicePickerModal({
             <div style={{ marginBottom: '8px', flexShrink: 0 }}>
               <input className="srch-inp" style={{ width: '100%', boxSizing: 'border-box' }}
                 placeholder="🔍 Search by name, platform or service ID..."
-                value={search} onChange={e => setSearch(e.target.value)} />
+                value={search} onChange={e => handleSearchChange(e.target.value)} />
             </div>
             <div style={{
               display: 'grid',
@@ -160,53 +172,70 @@ function ServicePickerModal({
               {filtered.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>No services found</div>
               ) : (
-                filtered.map(s => {
-                  const isOn      = selected.has(s.id);
-                  const hasCustom = customPrices?.[s.id] != null;
-                  return (
-                    <div key={s.id} onClick={() => toggle(s.id)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: '10px',
-                        padding: '9px 12px', borderRadius: '8px', marginBottom: '4px',
-                        cursor: 'pointer', transition: 'all .12s',
-                        background: isOn ? 'rgba(0,212,255,.07)' : 'rgba(0,0,0,.2)',
-                        border: `1px solid ${isOn ? 'rgba(0,212,255,.3)' : 'var(--br)'}`,
-                      }}>
-                      <div style={{
-                        width: '18px', height: '18px', borderRadius: '4px', flexShrink: 0,
-                        border: `2px solid ${isOn ? 'var(--neon)' : 'var(--br2)'}`,
-                        background: isOn ? 'var(--neon)' : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '10px', color: '#000', fontWeight: 900,
-                      }}>
-                        {isOn ? '✓' : ''}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {s.name}
+                <>
+                  {visibleServices.map(s => {
+                    const isOn      = selected.has(s.id);
+                    const hasCustom = customPrices?.[s.id] != null;
+                    return (
+                      <div key={s.id} onClick={() => toggle(s.id)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '10px',
+                          padding: '9px 12px', borderRadius: '8px', marginBottom: '4px',
+                          cursor: 'pointer', transition: 'all .12s',
+                          background: isOn ? 'rgba(0,212,255,.07)' : 'rgba(0,0,0,.2)',
+                          border: `1px solid ${isOn ? 'rgba(0,212,255,.3)' : 'var(--br)'}`,
+                        }}>
+                        <div style={{
+                          width: '18px', height: '18px', borderRadius: '4px', flexShrink: 0,
+                          border: `2px solid ${isOn ? 'var(--neon)' : 'var(--br2)'}`,
+                          background: isOn ? 'var(--neon)' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '10px', color: '#000', fontWeight: 900,
+                        }}>
+                          {isOn ? '✓' : ''}
                         </div>
-                        <div style={{ fontSize: '9px', color: 'var(--text3)' }}>
-                          {s.platform}
-                          {s.provider_service_id && (
-                            <span style={{ marginLeft: '6px', color: 'var(--neon)', opacity: 0.6 }}>
-                              ID: {s.provider_service_id}
-                            </span>
-                          )}
-                          {' · '}
-                          <span style={{ color: 'var(--gold)' }}>${parseFloat(s.price_per_1k).toFixed(4)}/1k</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {s.name}
+                          </div>
+                          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>
+                            {s.platform}
+                            {s.provider_service_id && (
+                              <span style={{ marginLeft: '6px', color: 'var(--neon)', opacity: 0.6 }}>
+                                ID: {s.provider_service_id}
+                              </span>
+                            )}
+                            {' · '}
+                            <span style={{ color: 'var(--gold)' }}>${parseFloat(s.price_per_1k).toFixed(4)}/1k</span>
+                          </div>
                         </div>
+                        {hasCustom && (
+                          <span style={{ fontSize: '8px', color: 'var(--neon)',
+                            background: 'rgba(0,212,255,.1)', border: '1px solid rgba(0,212,255,.2)',
+                            borderRadius: '4px', padding: '2px 5px', flexShrink: 0 }}>
+                            Custom $
+                          </span>
+                        )}
                       </div>
-                      {hasCustom && (
-                        <span style={{ fontSize: '8px', color: 'var(--neon)',
-                          background: 'rgba(0,212,255,.1)', border: '1px solid rgba(0,212,255,.2)',
-                          borderRadius: '4px', padding: '2px 5px', flexShrink: 0 }}>
-                          Custom $
-                        </span>
-                      )}
+                    );
+                  })}
+                  {/* Load More — avoids rendering thousands of DOM nodes at once */}
+                  {hasMoreToShow && (
+                    <button
+                      className="btn bgh bsm bw"
+                      style={{ width: '100%', marginTop: '6px' }}
+                      onClick={() => setPickerPage(p => p + 1)}
+                    >
+                      ⬇ Load more ({filtered.length - visibleServices.length} remaining)
+                    </button>
+                  )}
+                  {!hasMoreToShow && filtered.length > PICKER_PAGE && (
+                    <div style={{ textAlign: 'center', fontSize: '10px', color: 'var(--text3)', padding: '8px 0' }}>
+                      All {filtered.length} services shown
                     </div>
-                  );
-                })
+                  )}
+                </>
               )}
             </div>
             <button className="btn bp blg bw" onClick={handleSave} disabled={saving} style={{ flexShrink: 0 }}>
@@ -664,13 +693,16 @@ export default function AdminManageFilters({ user }) {
       // All services — FIX Phase-7: was while(true) with no upper bound.
       // Capped at MAX_PAGES (50 × 1000 = 50,000 services) so this can
       // never hang indefinitely if Supabase returns unexpected data.
+      // FIX service-limit: removed .eq('is_active', true) — the admin should
+      // be able to assign ANY service (active or inactive) to a filter so that
+      // when the service is later activated it is already correctly categorised.
       const BATCH     = 1000;
       const MAX_PAGES = 50;
       let allSvc = [];
       let from   = 0;
       for (let pg = 0; pg < MAX_PAGES; pg++) {
         const { data, error } = await supabase
-          .from('services').select('*').eq('is_active', true)
+          .from('services').select('*')
           .order('created_at', { ascending: false })
           .range(from, from + BATCH - 1);
         if (error) throw error;
