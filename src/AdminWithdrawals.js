@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-export default function AdminWithdrawals() {
+export default function AdminWithdrawals({ user }) {
   const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('pending');
   const [selected, setSelected] = useState(null);
   const [acting, setActing] = useState(false);
   const [note, setNote] = useState('');
+  // FIX Phase-17: inline message replaces window.alert() — alert() blocks the
+  // event loop, cannot be styled, and is suppressed in some CSP environments.
+  const [msg, setMsg] = useState('');
 
   useEffect(() => { loadWithdrawals(); }, []);
 
@@ -38,7 +41,9 @@ export default function AdminWithdrawals() {
     setSelected(null);
     setNote('');
     loadWithdrawals();
-    alert('✅ Withdrawal marked as processed!');
+    // FIX Phase-17: was alert() — now inline auto-dismissing message
+    setMsg('✅ Withdrawal marked as processed!');
+    setTimeout(() => setMsg(''), 4000);
   };
 
   const refundWithdrawal = async (w) => {
@@ -64,14 +69,46 @@ export default function AdminWithdrawals() {
     setActing(false);
     setSelected(null);
     loadWithdrawals();
-    alert('✅ Withdrawal refunded to user balance!');
+    // FIX Phase-17: was alert() — now inline auto-dismissing message
+    setMsg('✅ Withdrawal refunded to user balance!');
+    setTimeout(() => setMsg(''), 4000);
   };
 
   const totalPending = withdrawals.filter(w => !w.processed)
     .reduce((a, b) => a + Math.abs(parseFloat(b.amount)), 0);
 
+  // FIX Phase-19: component-level admin role guard — defence-in-depth on top
+  // of App.js routing. Prevents any admin page from rendering its content if
+  // the user object is missing or has a non-admin role (e.g. manipulated via
+  // React DevTools). Must come after all hook declarations (Rules of Hooks).
+  if (!user || user.role !== 'admin') {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛔</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800, letterSpacing: '2px' }}>
+          ACCESS DENIED
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>
+          Admin privileges required.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
+      {/* FIX Phase-17: inline success/error banner replaces window.alert() */}
+      {msg && (
+        <div style={{
+          background: msg.startsWith('✅') ? 'rgba(0,255,136,.08)' : 'rgba(255,50,80,.08)',
+          border: `1px solid ${msg.startsWith('✅') ? 'rgba(0,255,136,.25)' : 'rgba(255,50,80,.25)'}`,
+          borderRadius: '8px', padding: '10px 14px',
+          color: msg.startsWith('✅') ? 'var(--green)' : '#ff6b6b',
+          fontWeight: 700, fontSize: '13px', marginBottom: '14px',
+        }}>
+          {msg}
+        </div>
+      )}
       <div className="cgrid" style={{ marginBottom:'16px' }}>
         {[
           { ic:'⏳', lb:'Pending', vl:withdrawals.filter(w=>!w.processed).length, cl:'cw' },
