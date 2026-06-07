@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
+// REFACTOR Phase-23: typeIcon centralised in utils.js — removed local duplicate
+import { typeIcon } from './utils';
 
 export default function ResellerEarnings({ user }) {
   const [balance, setBalance] = useState(user.balance || 0);
@@ -26,9 +28,29 @@ export default function ResellerEarnings({ user }) {
 
   const submitWithdraw = async () => {
     if (!wAmount || parseFloat(wAmount) <= 0) { alert('Enter valid amount'); return; }
-    if (parseFloat(wAmount) > balance) { alert('Insufficient balance'); return; }
     if (!wAccount) { alert('Enter account number'); return; }
     setSubmitting(true);
+
+    // FIX Phase-13: Always fetch the live balance from DB immediately before
+    // both the sufficiency check and the deduction write. The `balance` state
+    // value is stale if an admin edit, deposit approval, or another session
+    // changed it after this component mounted or last called loadData().
+    const { data: freshProfile, error: balErr } = await supabase
+      .from('users').select('balance').eq('id', user.id).single();
+
+    if (balErr || !freshProfile) {
+      alert('Could not verify balance. Please refresh and try again.');
+      setSubmitting(false);
+      return;
+    }
+    const freshBalance = parseFloat(freshProfile.balance || 0);
+
+    if (parseFloat(wAmount) > freshBalance) {
+      alert('Insufficient balance');
+      setSubmitting(false);
+      return;
+    }
+
     await supabase.from('transactions').insert({
       user_id: user.id,
       type: 'withdrawal',
@@ -36,7 +58,9 @@ export default function ResellerEarnings({ user }) {
       description: `Withdrawal request: ${wMethod} - ${wAccount}`,
       ref_id: 'WD-' + Date.now(),
     });
-    await supabase.from('users').update({ balance: balance - parseFloat(wAmount) }).eq('id', user.id);
+    await supabase.from('users')
+      .update({ balance: freshBalance - parseFloat(wAmount) })
+      .eq('id', user.id);
     setSubmitting(false);
     setDone(true);
     setShowWithdraw(false);
@@ -49,15 +73,7 @@ export default function ResellerEarnings({ user }) {
   const withdrawn = txns.filter(t => t.type === 'withdrawal')
     .reduce((a, b) => a + Math.abs(parseFloat(b.amount)), 0);
 
-  const typeIcon = (type) => {
-    if (type === 'deposit') return '💳';
-    if (type === 'order') return '📦';
-    if (type === 'refund') return '↩️';
-    if (type === 'referral') return '🎁';
-    if (type === 'task') return '⚡';
-    if (type === 'withdrawal') return '💸';
-    return '💸';
-  };
+  // typeIcon imported from ./utils (REFACTOR Phase-23)
 
   return (
     <div>
