@@ -21,12 +21,6 @@ async function generateUniqueUsername(baseName) {
 export default function Auth({ onLogin, defaultTab }) {
   const [tab, setTab] = useState(defaultTab || 'login');
 
-  // FIX forgot-password: sync tab when the parent changes defaultTab
-  // (e.g. PASSWORD_RECOVERY event fires while Auth is already mounted)
-  useEffect(() => {
-    if (defaultTab) setTab(defaultTab);
-  }, [defaultTab]);
-
   // Login fields
   const [loginId,   setLoginId]   = useState('');
   const [password,  setPassword]  = useState('');
@@ -49,10 +43,11 @@ export default function Auth({ onLogin, defaultTab }) {
   const [forgotEmail,  setForgotEmail]  = useState('');
   const [forgotSent,   setForgotSent]   = useState(false);
 
-  // Reset password (after user clicks email link — PASSWORD_RECOVERY event)
-  const [resetPw,      setResetPw]      = useState('');
-  const [resetPwConf,  setResetPwConf]  = useState('');
-  const [resetDone,    setResetDone]    = useState(false);
+  // Password recovery (user clicked reset link from email)
+  const [isRecovery,    setIsRecovery]    = useState(false);
+  const [newPassword,   setNewPassword]   = useState('');
+  const [newPassword2,  setNewPassword2]  = useState('');
+  const [recoverySaved, setRecoverySaved] = useState(false);
 
   const [refCode, setRefCode] = useState('');
   useEffect(() => {
@@ -63,6 +58,29 @@ export default function Auth({ onLogin, defaultTab }) {
       setTab('signup');
     }
   }, []);
+
+  // Detect when user arrives via password reset email link
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecovery(true);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── HANDLE SET NEW PASSWORD (after reset link) ──────────────────────────────
+  const handleSetNewPassword = async () => {
+    if (!newPassword) { setError('Enter a new password'); return; }
+    if (newPassword.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (newPassword !== newPassword2) { setError('Passwords do not match'); return; }
+    setLoading(true);
+    setError('');
+    const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    setRecoverySaved(true);
+  };
 
   // Cleanup username timer on unmount
   useEffect(() => {
@@ -277,36 +295,12 @@ export default function Auth({ onLogin, defaultTab }) {
   const handleForgotPassword = async () => {
     if (!forgotEmail) { setError('Enter your email'); return; }
     setLoading(true);
-    // FIX forgot-password: use the canonical production URL as redirectTo so
-    // Supabase sends the correct link on both localhost and the deployed site.
-    // window.location.origin works on the deployed site but returns
-    // http://localhost:3000 in dev — both are fine as long as both are listed
-    // in Supabase Auth → URL Configuration → Redirect URLs.
     const { error: err } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-      redirectTo: window.location.origin + '/',
+      redirectTo: window.location.origin,
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
     setForgotSent(true);
-  };
-
-  // ── RESET PASSWORD (called after user clicks the email link) ───────────────
-  // Supabase fires PASSWORD_RECOVERY → App.js sets defaultTab='reset' →
-  // this view is shown. supabase.auth.updateUser() works because Supabase
-  // automatically sets the session from the URL hash on page load.
-  const handleResetPassword = async () => {
-    setError('');
-    if (!resetPw || !resetPwConf) { setError('Fill both fields'); return; }
-    if (resetPw.length < 8) { setError('Password must be at least 8 characters'); return; }
-    if (resetPw !== resetPwConf) { setError('Passwords do not match'); return; }
-    setLoading(true);
-    const { error: err } = await supabase.auth.updateUser({ password: resetPw });
-    setLoading(false);
-    if (err) { setError(err.message); return; }
-    setResetDone(true);
-    setResetPw(''); setResetPwConf('');
-    // Auto-redirect to login after 2.5 seconds
-    setTimeout(() => { setTab('login'); setResetDone(false); }, 2500);
   };
 
   const UsernameIndicator = () => {
@@ -316,6 +310,67 @@ export default function Auth({ onLogin, defaultTab }) {
     if (usernameStatus === 'taken')     return <span style={{ fontSize: '11px', color: 'var(--danger)' }}>❌ Already taken</span>;
     return null;
   };
+
+  // ── PASSWORD RECOVERY VIEW (user clicked reset link from email) ───────────
+  if (isRecovery) {
+    return (
+      <div className="auth-wrap" style={{ position: 'relative', zIndex: 10 }}>
+        <div className="gbg" />
+        <div className="aw">
+          <div className="agl" />
+          <div className="ai">
+            <div style={{ textAlign: 'center', marginBottom: '22px' }}>
+              <div className="lt">NEXUSFLOW HUB</div>
+              <div className="ls">Set New Password</div>
+            </div>
+            {recoverySaved ? (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '40px', marginBottom: '12px' }}>✅</div>
+                <div style={{ color: 'var(--green)', fontWeight: 700, marginBottom: '8px' }}>Password updated!</div>
+                <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '20px', lineHeight: 1.6 }}>
+                  Your password has been changed successfully. You can now log in with your new password.
+                </div>
+                <button
+                  className="btn bp blg bw"
+                  onClick={() => { setIsRecovery(false); setRecoverySaved(false); setNewPassword(''); setNewPassword2(''); }}
+                >
+                  <span>Go to Login</span><span>→</span>
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="fi">
+                  <label className="fl">New Password</label>
+                  <input
+                    className="inp"
+                    type="password"
+                    placeholder="Min 8 characters"
+                    value={newPassword}
+                    onChange={e => { setNewPassword(e.target.value); setError(''); }}
+                  />
+                </div>
+                <div className="fi">
+                  <label className="fl">Confirm New Password</label>
+                  <input
+                    className="inp"
+                    type="password"
+                    placeholder="Repeat new password"
+                    value={newPassword2}
+                    onChange={e => { setNewPassword2(e.target.value); setError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && handleSetNewPassword()}
+                  />
+                </div>
+                <div className="aerr">{error}</div>
+                <button className="btn bp blg bw" onClick={handleSetNewPassword} disabled={loading}>
+                  <span>{loading ? 'Saving...' : 'Set New Password'}</span><span>→</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── FORGOT PASSWORD VIEW ───────────────────────────────────────────────────
   if (showForgot) {
@@ -407,15 +462,6 @@ export default function Auth({ onLogin, defaultTab }) {
               onClick={() => { setTab('signup'); setError(''); setMsg(''); }}
             >Sign Up</button>
           </div>
-          {/* Hide tab bar on reset tab — user should only complete or cancel */}
-          {tab === 'reset' && (
-            <div style={{
-              textAlign: 'center', marginBottom: '14px',
-              fontSize: '13px', fontWeight: 800, color: 'var(--neon)', letterSpacing: '1px',
-            }}>
-              🔐 SET NEW PASSWORD
-            </div>
-          )}
 
           {msg && (
             <div style={{
@@ -544,62 +590,6 @@ export default function Auth({ onLogin, defaultTab }) {
               >
                 <span>{loading ? 'Creating...' : 'Create Account'}</span><span>✦</span>
               </button>
-            </div>
-          )}
-          {/* RESET PASSWORD TAB — shown after user clicks the password reset email link */}
-          {tab === 'reset' && (
-            <div>
-              {resetDone ? (
-                <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                  <div style={{ fontSize: '40px', marginBottom: '10px' }}>✅</div>
-                  <div style={{ color: 'var(--green)', fontWeight: 800, fontSize: '16px', marginBottom: '8px' }}>
-                    Password Updated!
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text2)' }}>Redirecting to login...</div>
-                </div>
-              ) : (
-                <>
-                  <div style={{
-                    background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.2)',
-                    borderRadius: '7px', padding: '10px 12px', fontSize: '12px',
-                    color: 'var(--text2)', marginBottom: '16px', lineHeight: 1.6,
-                  }}>
-                    🔐 Enter your new password below to complete the reset.
-                  </div>
-                  <div className="fi">
-                    <label className="fl">New Password</label>
-                    <input
-                      className="inp"
-                      type="password"
-                      placeholder="Minimum 8 characters"
-                      value={resetPw}
-                      onChange={e => setResetPw(e.target.value)}
-                    />
-                  </div>
-                  <div className="fi">
-                    <label className="fl">Confirm New Password</label>
-                    <input
-                      className="inp"
-                      type="password"
-                      placeholder="Repeat new password"
-                      value={resetPwConf}
-                      onChange={e => setResetPwConf(e.target.value)}
-                    />
-                  </div>
-                  <div className="aerr">{error}</div>
-                  <button className="btn bp blg bw" onClick={handleResetPassword} disabled={loading}>
-                    <span>{loading ? 'Saving...' : 'Set New Password'}</span><span>🔒</span>
-                  </button>
-                  <div style={{ textAlign: 'center', marginTop: '12px' }}>
-                    <button
-                      onClick={() => { setTab('login'); setError(''); setResetPw(''); setResetPwConf(''); }}
-                      style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '12px' }}
-                    >
-                      ← Back to Login
-                    </button>
-                  </div>
-                </>
-              )}
             </div>
           )}
         </div>
