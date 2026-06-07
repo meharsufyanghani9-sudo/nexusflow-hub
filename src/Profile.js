@@ -18,14 +18,20 @@ export default function Profile({ user, onLogout }) {
     if (newPw !== confPw) { setPwMsg('Passwords do not match'); return; }
     setLoading(true);
     try {
+      // FIX Phase-22: use signInWithPassword only as a current-password
+      // verification step — not to generate a new session. After the check,
+      // updateUser() changes the password without invalidating the active
+      // session, so the subsequent signOut + signIn re-auth that was here is
+      // removed — it was redundant and added ~1-2 seconds of latency.
       const { error: signInErr } = await supabase.auth.signInWithPassword({
         email: user.email, password: curPw,
       });
       if (signInErr) { setPwMsg('Current password is incorrect'); setLoading(false); return; }
+
       const { error: updateErr } = await supabase.auth.updateUser({ password: newPw });
       if (updateErr) { setPwMsg('Update failed: ' + updateErr.message); setLoading(false); return; }
-      await supabase.auth.signOut();
-      await supabase.auth.signInWithPassword({ email: user.email, password: newPw });
+
+      // Session remains valid after updateUser — no signOut/signIn needed.
       setPwOk(true);
       setPwMsg('✅ Password changed successfully!');
       setCurPw(''); setNewPw(''); setConfPw('');
