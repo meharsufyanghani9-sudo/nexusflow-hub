@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import './style.css';
 import { supabase } from './supabase';
+// REFACTOR Phase-15: nav data centralised — no longer duplicated across App/Topbar/Sidebar
+import { pageTitles, buyerNav, resellerNav, adminNav } from './navigation';
 
 // ─── Always-loaded (tiny shell components, needed on every screen) ────────────
 import Landing        from './Landing';
@@ -76,45 +78,8 @@ function PageLoader() {
   );
 }
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-const pageTitles = {
-  dashboard:    'Dashboard',    marketplace:   'Marketplace',
-  orders:       'My Orders',    deposit:       'Add Funds',
-  transactions: 'Transactions', referral:      'Referral & Earn',
-  tasks:        'Earn Tasks',   profile:       'My Profile',
-  panelapi:     'API Access',   services:      'Services',
-  earnings:     'Earnings',     deposits:      'Manage Deposits',
-  withdrawals:  'Withdrawals',  users:         'All Users',
-  resellers:    'Resellers',    api:           'API Import',
-  disputes:     'Disputes',     settings:      'Settings',
-  admintasks:   'Manage Tasks', adminreferral: 'Referral Settings',
-  support:      'Support Tickets', currencies: 'Currency Rates',
-  massemail:    'Mass Email',   buyersupport:  'Support',
-  adminorders:  'Manage Orders', adminservices: 'Manage Services',
-  adminfilters: 'Manage Filters',
-};
-
-const buyerNav = [
-  { ic: '🏠', lb: 'Home',     id: 'dashboard'   },
-  { ic: '🛒', lb: 'Services', id: 'marketplace' },
-  { ic: '📦', lb: 'Orders',   id: 'orders'      },
-  { ic: '✅', lb: 'Deposits', id: 'deposit'     },
-  { ic: '👤', lb: 'Profile',  id: 'profile'     },
-];
-const resellerNav = [
-  { ic: '🏠', lb: 'Home',     id: 'dashboard'    },
-  { ic: '🏪', lb: 'Services', id: 'services'     },
-  { ic: '💵', lb: 'Earnings', id: 'earnings'     },
-  { ic: '📊', lb: 'Txns',     id: 'transactions' },
-  { ic: '👤', lb: 'Profile',  id: 'profile'      },
-];
-const adminNav = [
-  { ic: '🏠', lb: 'Home',     id: 'dashboard'    },
-  { ic: '📦', lb: 'Orders',   id: 'adminorders'  },
-  { ic: '🛍',  lb: 'Services', id: 'adminservices'},
-  { ic: '✅', lb: 'Deposits', id: 'deposits'     },
-  { ic: '👤', lb: 'Profile',  id: 'profile'      },
-];
+// ─── Data (REFACTOR Phase-15: imported from navigation.js) ───────────────────
+// pageTitles, buyerNav, resellerNav, adminNav all come from ./navigation
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 // FIX #31: capped loop replaces the while(true) that was here — can never hang
@@ -222,6 +187,36 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // FIX Phase-20: Subscribe to real-time balance updates for the logged-in user.
+  // Without this, the balance shown in Topbar/Sidebar is stale after any order,
+  // deposit approval, admin edit, or refund — until a full page refresh.
+  // We create/destroy the channel whenever the user id changes (login/logout).
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const balanceChannel = supabase
+      .channel(`user-balance-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event:  'UPDATE',
+          schema: 'public',
+          table:  'users',
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.new && payload.new.balance !== undefined) {
+            setUser(prev =>
+              prev ? { ...prev, balance: parseFloat(payload.new.balance || 0) } : prev
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { balanceChannel.unsubscribe(); };
+  }, [user?.id]);
+
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -280,21 +275,21 @@ export default function App() {
 
     if (user.role === 'admin') {
       if (page === 'dashboard')    return <AdminDashboard   user={user} onNav={navigate} />;
-      if (page === 'adminorders')  return <AdminOrders />;
-      if (page === 'adminservices')return <AdminServices />;
-      if (page === 'adminfilters') return <AdminManageFilters />;
-      if (page === 'deposits')     return <AdminDeposits />;
-      if (page === 'users')        return <AdminUsers />;
-      if (page === 'settings')     return <AdminSettings />;
-      if (page === 'disputes')     return <AdminDisputes />;
-      if (page === 'api')          return <AdminApiImport />;
-      if (page === 'withdrawals')  return <AdminWithdrawals />;
-      if (page === 'resellers')    return <AdminResellers />;
-      if (page === 'admintasks')   return <AdminTasks />;
-      if (page === 'adminreferral')return <AdminReferral />;
-      if (page === 'support')      return <AdminSupport />;
-      if (page === 'currencies')   return <AdminCurrencies />;
-      if (page === 'massemail')    return <AdminMassEmail />;
+      if (page === 'adminorders')  return <AdminOrders      user={user} />;
+      if (page === 'adminservices')return <AdminServices    user={user} />;
+      if (page === 'adminfilters') return <AdminManageFilters user={user} />;
+      if (page === 'deposits')     return <AdminDeposits    user={user} />;
+      if (page === 'users')        return <AdminUsers       user={user} />;
+      if (page === 'settings')     return <AdminSettings    user={user} />;
+      if (page === 'disputes')     return <AdminDisputes    user={user} />;
+      if (page === 'api')          return <AdminApiImport   user={user} />;
+      if (page === 'withdrawals')  return <AdminWithdrawals user={user} />;
+      if (page === 'resellers')    return <AdminResellers   user={user} />;
+      if (page === 'admintasks')   return <AdminTasks       user={user} />;
+      if (page === 'adminreferral')return <AdminReferral    user={user} />;
+      if (page === 'support')      return <AdminSupport     user={user} />;
+      if (page === 'currencies')   return <AdminCurrencies  user={user} />;
+      if (page === 'massemail')    return <AdminMassEmail   user={user} />;
       if (page === 'createreseller') return <AdminCreateReseller />;
       if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
     }
