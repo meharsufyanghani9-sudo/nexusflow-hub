@@ -60,6 +60,7 @@ body::after{
 .bd{background:linear-gradient(135deg,#cc0033,#ff3355);color:#fff;font-weight:800;box-shadow:0 4px 0 #880022}
 .bgh{background:var(--gl2);border:1px solid var(--br2);color:var(--text)}
 .bpu{background:linear-gradient(135deg,#5500cc,#7b2fff);color:#fff;font-weight:800}
+.bgo{background:linear-gradient(135deg,#cc8800,#ffd700);color:#000;font-weight:800;box-shadow:0 4px 0 #885500,0 6px 14px rgba(255,215,0,.2)}
 
 /* ═══ INPUTS ═══ */
 .inp,.sel{
@@ -667,8 +668,13 @@ body.light .cd{color:var(--danger)}
 
 /* ═══ MOBILE RESPONSIVENESS — COMPREHENSIVE ═══ */
 
-/* Prevent zoom on input focus (iOS) */
-input,select,textarea{font-size:16px!important;}
+/* Prevent zoom on input focus (iOS) — REFACTOR Phase-16: was a global rule
+   which silently defeated the 14px set on .inp for desktop. Now scoped to
+   ≤767px so desktop inputs render at their intended 14px and only mobile
+   inputs are bumped to 16px to prevent iOS Safari's auto-zoom on focus. */
+@media(max-width:767px){
+  input,select,textarea{font-size:16px!important;}
+}
 
 /* Tables always scroll horizontally — never overflow */
 .tblw{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -804,6 +810,7 @@ body.light .mkt-featured{
 
 /* ═══ ANIMATIONS ═══ */
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
 /* ═══ 2-COL GRID UTILITY ═══ */
 .mkt-grid-2col{display:grid;grid-template-columns:repeat(2,1fr)!important;gap:12px;}
