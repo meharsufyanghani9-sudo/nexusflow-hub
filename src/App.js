@@ -135,34 +135,53 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // FIX #30: orphaned fire-and-forget warm-up query REMOVED from here.
-    // The getSession() call below already warms the Supabase connection.
+    // ── STEP 1: Register onAuthStateChange FIRST, before anything else ──────
+    // This guarantees PASSWORD_RECOVERY is caught even if the Supabase client
+    // processes the hash/code before our restoreSession runs.
+    let recoveryDetected = false;
 
-    const restoreSession = async () => {
-      // ── FIX: Intercept password-recovery links BEFORE restoring session ──
-      // When the user clicks the reset-password link in their email, Supabase
-      // redirects back to the site with a URL hash like:
-      //   #access_token=...&type=recovery
-      // We must detect this FIRST — otherwise getSession() below finds a valid
-      // session and routes the user to the main app, bypassing the reset form.
-      // Check hash fragment: #access_token=...&type=recovery  (Supabase PKCE flow)
-      const hash = window.location.hash;
-      const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
-      const isRecoveryHash = hashParams.get('type') === 'recovery';
-
-      // Check query param: ?reset=1  (set by our redirectTo as a backup signal)
-      const searchParams = new URLSearchParams(window.location.search);
-      const isRecoveryQuery = searchParams.get('reset') === '1';
-
-      if (isRecoveryHash || isRecoveryQuery) {
-        // Clean URL so a page refresh doesn't re-trigger
-        window.history.replaceState(null, '', window.location.pathname);
-        setScreen('auth');
-        setAuthTab('recovery');
-        return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event) => {
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setScreen('landing');
+          setPage('dashboard');
+          setPageHistory(['dashboard']);
+        }
+        if (event === 'PASSWORD_RECOVERY') {
+          recoveryDetected = true;
+          window.history.replaceState(null, '', window.location.pathname);
+          setScreen('auth');
+          setAuthTab('recovery');
+        }
       }
+    );
 
+    // ── STEP 2: Also check URL hash/query manually as a belt-and-suspenders ──
+    // Supabase implicit flow: #access_token=...&type=recovery
+    // Supabase PKCE flow:     ?code=...  (exchanged for session automatically)
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const searchParams = new URLSearchParams(window.location.search);
+    const isRecoveryHash  = hashParams.get('type') === 'recovery';
+    const isRecoveryQuery = searchParams.get('reset') === '1';
+    // ?code= param means PKCE exchange in progress — wait for onAuthStateChange
+    const hasPkceCode     = searchParams.has('code');
+
+    if (isRecoveryHash || isRecoveryQuery || hasPkceCode) {
+      window.history.replaceState(null, '', window.location.pathname);
+      setScreen('auth');
+      setAuthTab('recovery');
+      // Don't call restoreSession — the onAuthStateChange above will handle it
+      return () => subscription.unsubscribe();
+    }
+
+    // ── STEP 3: Normal session restore (no recovery link in URL) ─────────────
+    const restoreSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+
+      // If PASSWORD_RECOVERY fired between step 1 and here, don't override it
+      if (recoveryDetected) return;
+
       if (session?.user) {
         const { data: profile } = await supabase
           .from('users').select('*').eq('id', session.user.id).maybeSingle();
@@ -170,7 +189,6 @@ export default function App() {
         if (profile && profile.is_active !== false) {
           let username = profile.username;
           if (!username) {
-            // FIX #31: uses the capped generateUniqueUsername above
             username = await generateUniqueUsername(profile.full_name || 'user');
             await supabase.from('users').update({ username }).eq('id', session.user.id);
           }
@@ -183,29 +201,14 @@ export default function App() {
             balance:       parseFloat(profile.balance || 0),
             referral_code: profile.referral_code,
           });
-          setScreen('app');
+          if (!recoveryDetected) setScreen('app');
           return;
         }
       }
-      setScreen('landing');
+      if (!recoveryDetected) setScreen('landing');
     };
 
     restoreSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event) => {
-        if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setScreen('landing');
-          setPage('dashboard');
-          setPageHistory(['dashboard']);
-        }
-        if (event === 'PASSWORD_RECOVERY') {
-          setScreen('auth');
-          setAuthTab('recovery');
-        }
-      }
-    );
 
     return () => subscription.unsubscribe();
   }, []);
