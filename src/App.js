@@ -178,8 +178,11 @@ export default function App() {
           setPageHistory(['dashboard']);
         }
         if (event === 'PASSWORD_RECOVERY') {
+          // FIX forgot-password: was setting authTab='login' which showed the
+          // login form — user had no way to type their new password.
+          // Now sets 'reset' so Auth.js shows the Set New Password form.
           setScreen('auth');
-          setAuthTab('login');
+          setAuthTab('reset');
         }
       }
     );
