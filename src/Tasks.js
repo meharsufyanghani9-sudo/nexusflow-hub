@@ -42,6 +42,10 @@ export default function Tasks({ user }) {
   };
 
   const submitTask = async () => {
+    // FIX Phase-18: hard guard at function entry — the disabled button attribute
+    // already prevents normal UI double-clicks, but this stops any programmatic
+    // or re-render-triggered duplicate call from reaching the DB insert.
+    if (submitting) return;
     if (!proof.trim()) {
       setSubmitMsg('❌ Enter proof link or description first.');
       return;
