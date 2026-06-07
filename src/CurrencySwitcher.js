@@ -2,69 +2,98 @@ import React from 'react';
 import { useCurrency } from './CurrencyContext';
 
 export default function CurrencySwitcher({ onClose }) {
-  const { currency, allCurrencies, changeCurrency } = useCurrency();
+  const { currency, currencies, setCurrency, loading } = useCurrency();
 
-  const select = (curr) => {
-    changeCurrency(curr);
+  const handleSelect = (cur) => {
+    setCurrency(cur);
     onClose();
   };
 
-  // Sort so PKR comes first, USD goes after PKR, rest alphabetical
-  const sorted = [...allCurrencies].sort((a, b) => {
-    if (a.code === 'PKR') return -1;
-    if (b.code === 'PKR') return 1;
-    if (a.code === 'USD') return -1;
-    if (b.code === 'USD') return 1;
-    return a.code.localeCompare(b.code);
-  });
-
   return (
     <div className="mlay" onClick={e => e.target.classList.contains('mlay') && onClose()}>
-      <div className="mbox">
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
-          <div className="mttl">💱 Change Currency</div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+      <div className="mbox" style={{ maxWidth: '380px' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div className="mttl">💱 Select Currency</div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}
+          >
+            ✕
+          </button>
         </div>
-        <p style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '14px', lineHeight: 1.6 }}>
-          All prices across the panel will change instantly to your selected currency.
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-          {sorted.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text3)' }}>Loading currencies...</div>
-          )}
-          {sorted.map(c => (
-            <div key={c.code} onClick={() => select(c)} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '11px 14px', borderRadius: '8px', cursor: 'pointer',
-              border: `1px solid ${currency.code === c.code ? 'var(--neon)' : 'var(--br)'}`,
-              background: currency.code === c.code ? 'var(--gl2)' : 'var(--gl)',
-              transition: 'all .15s'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{
-                  fontFamily: 'var(--fm)', fontWeight: 700, fontSize: '18px',
-                  color: currency.code === c.code ? 'var(--neon)' : 'var(--text2)',
-                  minWidth: '28px', textAlign: 'center'
-                }}>{c.symbol}</span>
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: currency.code === c.code ? 'var(--neon)' : 'var(--text)' }}>
-                    {c.code}
-                    {c.code === 'PKR' && <span style={{ fontSize: '9px', color: 'var(--gold)', marginLeft: '6px' }}>DEFAULT</span>}
+
+        {/* Current */}
+        <div style={{
+          padding: '10px 14px', borderRadius: '8px', marginBottom: '14px',
+          background: 'rgba(0,212,255,.06)', border: '1px solid var(--br)',
+          fontSize: '12px', color: 'var(--text2)',
+        }}>
+          Current: <strong style={{ color: 'var(--neon)' }}>
+            {currency.symbol} {currency.code} — {currency.name}
+          </strong>
+        </div>
+
+        {/* List */}
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text3)', fontSize: '12px' }}>
+            Loading currencies…
+          </div>
+        ) : currencies.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text3)', fontSize: '12px' }}>
+            No currencies available.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '340px', overflowY: 'auto' }}>
+            {currencies.map(cur => {
+              const isActive = cur.code === currency.code;
+              return (
+                <div
+                  key={cur.code}
+                  onClick={() => handleSelect(cur)}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '11px 14px', borderRadius: '8px', cursor: 'pointer',
+                    background: isActive ? 'rgba(0,212,255,.10)' : 'var(--bg2)',
+                    border: isActive ? '1px solid rgba(0,212,255,.35)' : '1px solid var(--br)',
+                    transition: 'all .15s',
+                  }}
+                  onMouseOver={e => { if (!isActive) e.currentTarget.style.background = 'var(--gl2)'; }}
+                  onMouseOut={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg2)'; }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{
+                      fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800,
+                      color: isActive ? 'var(--neon)' : 'var(--text)',
+                      minWidth: '28px', textAlign: 'center',
+                    }}>
+                      {cur.symbol}
+                    </span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '13px', color: isActive ? 'var(--neon)' : 'var(--text)' }}>
+                        {cur.code}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text3)' }}>{cur.name}</div>
+                    </div>
                   </div>
-                  <div style={{ fontSize: '10px', color: 'var(--text3)' }}>{c.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text3)' }}>
+                      ×{Number(cur.rate).toFixed(4)}
+                    </span>
+                    {isActive && (
+                      <span style={{
+                        fontSize: '10px', fontWeight: 700, color: 'var(--neon)',
+                        background: 'rgba(0,212,255,.12)', padding: '2px 7px', borderRadius: '4px',
+                      }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: 'var(--fm)' }}>
-                  1 USD = {parseFloat(c.rate).toLocaleString()} {c.code}
-                </div>
-                {currency.code === c.code && (
-                  <div style={{ fontSize: '9px', color: 'var(--green)', marginTop: '2px' }}>✓ Active</div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
