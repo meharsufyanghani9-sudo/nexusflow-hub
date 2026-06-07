@@ -58,7 +58,13 @@ export default function ResellerServices({ user }) {
     };
     let error;
     if (editing) {
-      ({ error } = await supabase.from('services').update(payload).eq('id', editing));
+      // FIX Phase-14: chain .eq('vendor_id', user.id) so a reseller cannot
+      // overwrite another vendor's service even if they know its UUID.
+      // Defence-in-depth on top of any Supabase RLS policy.
+      ({ error } = await supabase.from('services')
+        .update(payload)
+        .eq('id', editing)
+        .eq('vendor_id', user.id));
     } else {
       ({ error } = await supabase.from('services').insert(payload));
     }
@@ -71,13 +77,21 @@ export default function ResellerServices({ user }) {
   };
 
   const toggleActive = async (svc) => {
-    await supabase.from('services').update({ is_active: !svc.is_active }).eq('id', svc.id);
+    // FIX Phase-14: vendor_id guard — only the owner can toggle their service
+    await supabase.from('services')
+      .update({ is_active: !svc.is_active })
+      .eq('id', svc.id)
+      .eq('vendor_id', user.id);
     loadServices();
   };
 
   const deleteService = async (id) => {
     if (!window.confirm('Delete this service?')) return;
-    await supabase.from('services').delete().eq('id', id);
+    // FIX Phase-14: vendor_id guard — only the owner can delete their service
+    await supabase.from('services')
+      .delete()
+      .eq('id', id)
+      .eq('vendor_id', user.id);
     loadServices();
   };
 
