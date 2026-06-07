@@ -1,59 +1,87 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 
-const CurrencyContext = createContext();
+// ─── Default (fallback) currency ─────────────────────────────────────────────
+const DEFAULT_CURRENCY = {
+  code:   'USD',
+  symbol: '$',
+  name:   'US Dollar',
+  rate:   1,
+};
+
+const CurrencyContext = createContext({
+  currency: DEFAULT_CURRENCY,
+  currencies: [DEFAULT_CURRENCY],
+  setCurrency: () => {},
+  format: (amount) => '$' + Number(amount).toFixed(2),
+  loading: false,
+});
 
 export function CurrencyProvider({ children }) {
-  const [currency, setCurrency] = useState({
-    code:'USD', symbol:'$', name:'US Dollar', rate:1
-  });
-  const [allCurrencies, setAllCurrencies] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const [currencies,       setCurrencies]       = useState([DEFAULT_CURRENCY]);
+  const [selectedCurrency, setSelectedCurrency] = useState(DEFAULT_CURRENCY);
+  const [loading,          setLoading]          = useState(true);
 
-  useEffect(() => { loadCurrencies(); }, []);
+  // Load all active currencies from DB
+  const loadCurrencies = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('currencies')
+      .select('*')
+      .eq('is_active', true)
+      .order('code');
 
-  const loadCurrencies = async () => {
-    const { data } = await supabase
-      .from('currencies').select('*')
-      .eq('is_active', true).order('code');
-    if (data && data.length > 0) {
-      setAllCurrencies(data);
-      const saved = localStorage.getItem('nf_currency_code');
-      if (saved) {
-        const found = data.find(c => c.code === saved);
-        if (found) setCurrency(found);
-      }
-    }
-    setLoaded(true);
-  };
-
-  const changeCurrency = (curr) => {
-    setCurrency(curr);
-    localStorage.setItem('nf_currency_code', curr.code);
-  };
-
-  const format = (usdAmount) => {
-    const amt = parseFloat(usdAmount) || 0;
-    const converted = amt * parseFloat(currency.rate || 1);
-    // Always show 2 decimals if amount is less than 1, else 0 for non-USD
-    let decimals;
-    if (['USD','EUR','GBP'].includes(currency.code)) {
-      decimals = 2;
-    } else if (converted > 0 && converted < 1) {
-      decimals = 2; // show paisa e.g. Rs0.50
-    } else if (converted >= 1 && converted < 10) {
-      decimals = 1; // show e.g. Rs3.5
+    if (!error && data && data.length > 0) {
+      setCurrencies(data);
+      // Restore previously selected currency from localStorage
+      try {
+        const saved = localStorage.getItem('nf_currency');
+        if (saved) {
+          const found = data.find(c => c.code === saved);
+          if (found) { setSelectedCurrency(found); setLoading(false); return; }
+        }
+      } catch (_) {}
+      // Default to USD, or first in list
+      const usd = data.find(c => c.code === 'USD');
+      setSelectedCurrency(usd || data[0]);
     } else {
-      decimals = 0; // Rs40
+      setCurrencies([DEFAULT_CURRENCY]);
+      setSelectedCurrency(DEFAULT_CURRENCY);
     }
-    return `${currency.symbol}${converted.toFixed(decimals)}`;
-  };
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadCurrencies(); }, [loadCurrencies]);
+
+  const changeCurrency = useCallback((cur) => {
+    setSelectedCurrency(cur);
+    try { localStorage.setItem('nf_currency', cur.code); } catch (_) {}
+  }, []);
+
+  // Convert + format a USD amount into the selected currency
+  const format = useCallback((usdAmount) => {
+    const amt    = Number(usdAmount) || 0;
+    const rate   = Number(selectedCurrency.rate) || 1;
+    const symbol = selectedCurrency.symbol || '$';
+    return symbol + (amt * rate).toFixed(2);
+  }, [selectedCurrency]);
 
   return (
-    <CurrencyContext.Provider value={{ currency, allCurrencies, changeCurrency, format, loadCurrencies }}>
+    <CurrencyContext.Provider value={{
+      currency:    selectedCurrency,
+      currencies,
+      setCurrency: changeCurrency,
+      format,
+      loading,
+      reload: loadCurrencies, loadCurrencies,
+    }}>
       {children}
     </CurrencyContext.Provider>
   );
 }
 
-export const useCurrency = () => useContext(CurrencyContext);
+export function useCurrency() {
+  return useContext(CurrencyContext);
+}
+
+export default CurrencyContext;
