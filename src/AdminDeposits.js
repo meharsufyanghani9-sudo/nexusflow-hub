@@ -11,7 +11,7 @@ function depositDisplay(dep) {
   return { label: `₨${amt.toLocaleString()} PKR`, color: '#4CAF50' };
 }
 
-export default function AdminDeposits() {
+export default function AdminDeposits({ user }) {
   const [deposits, setDeposits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('pending');
@@ -189,8 +189,20 @@ export default function AdminDeposits() {
           });
 
           if (joinBonus > 0) {
+            // FIX Phase-4: Re-fetch the depositing user's current balance from DB
+            // before adding the joiner bonus. `newBalance` is the value computed
+            // earlier (before the inviter bonus step), but the depositor's DB row
+            // could have been touched by a concurrent write between line 119 and
+            // here. Always read fresh to avoid a stale-write overwrite.
+            const { data: freshDepositor } = await supabase
+              .from('users')
+              .select('balance')
+              .eq('id', dep.user_id)
+              .single();
+            const depositorCurrentBalance = parseFloat(freshDepositor?.balance || 0);
+
             await supabase.from('users')
-              .update({ balance: newBalance + joinBonus })
+              .update({ balance: depositorCurrentBalance + joinBonus })
               .eq('id', dep.user_id);
 
             await supabase.from('transactions').insert({
@@ -240,6 +252,24 @@ export default function AdminDeposits() {
   const totalApproved = deposits
     .filter(d => d.status === 'approved')
     .reduce((a, b) => a + parseFloat(b.amount || 0), 0);
+
+  // FIX Phase-19: component-level admin role guard — defence-in-depth on top
+  // of App.js routing. Prevents any admin page from rendering its content if
+  // the user object is missing or has a non-admin role (e.g. manipulated via
+  // React DevTools). Must come after all hook declarations (Rules of Hooks).
+  if (!user || user.role !== 'admin') {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛔</div>
+        <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 800, letterSpacing: '2px' }}>
+          ACCESS DENIED
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>
+          Admin privileges required.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
