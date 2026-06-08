@@ -320,10 +320,11 @@ td{padding:9px 10px;border-top:1px solid var(--br);vertical-align:middle}
 .mbox{
   background:var(--bg2);border:1px solid var(--br2);
   padding:20px 16px;width:100%;
-  max-height:90vh;overflow-y:auto;
+  max-height:90vh;overflow-y:hidden;
+  display:flex;flex-direction:column;
   border-radius:16px 16px 0 0;
 }
-@media(min-width:640px){.mbox{max-width:500px;border-radius:var(--r2);max-height:88vh}}
+@media(min-width:640px){.mbox{max-width:500px;border-radius:var(--r2);max-height:88vh;overflow-y:hidden;display:flex;flex-direction:column}}
 .mttl{font-family:'Orbitron',monospace;font-size:12px;font-weight:800;letter-spacing:2px;margin-bottom:14px}
 
 /* ═══ TOAST ═══ */
@@ -739,6 +740,8 @@ body.light .cd{color:var(--danger)}
     margin:0!important;
     padding:16px 12px 20px!important;
     max-height:92vh!important;
+    overflow-y:hidden!important;
+    display:flex!important;flex-direction:column!important;
   }
 
   /* Admin filter card grids: auto-fill, never overflow */
@@ -794,6 +797,8 @@ body.light .cd{color:var(--danger)}
     bottom:auto!important;
     padding:20px 16px!important;
     max-height:88vh!important;
+    overflow-y:hidden!important;
+    display:flex!important;flex-direction:column!important;
   }
 }
 
