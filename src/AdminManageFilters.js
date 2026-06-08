@@ -751,8 +751,8 @@ export default function AdminManageFilters({ user }) {
   };
 
   // ── loadAll ───────────────────────────────────────────
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       // All services — FIX Phase-7: was while(true) with no upper bound.
       // Capped at MAX_PAGES (50 × 1000 = 50,000 services) so this can
@@ -901,10 +901,41 @@ export default function AdminManageFilters({ user }) {
         showToast('Failed to load: ' + msg, 'error');
       }
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // ── Real-time sync: reload whenever any other session changes filter data ──
+  // This ensures two admins on different devices (or same account, two tabs)
+  // always see the same data — no stale state, no double-approvals.
+  useEffect(() => {
+    const tables = [
+      'filter_platforms',
+      'filter_service_types',
+      'filter_types',
+      'filter_platform_services',
+      'filter_service_type_services',
+      'filter_type_services',
+      'filter_platform_service_types',
+      'filter_service_type_filter_types',
+      'service_custom_prices',
+    ];
+
+    const channels = tables.map(table =>
+      supabase
+        .channel(`realtime:${table}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+          // Reload silently (no loading spinner) so the UI stays responsive
+          loadAll(true);
+        })
+        .subscribe()
+    );
+
+    return () => {
+      channels.forEach(ch => supabase.removeChannel(ch));
+    };
+  }, [loadAll]);
 
   // ── Add filter ────────────────────────────────────────
   const handleAddFilter = async ({ name, icon, color, slug }) => {
