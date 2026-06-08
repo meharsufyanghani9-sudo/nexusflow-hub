@@ -160,12 +160,19 @@ function ServicePickerModal({
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(2,1fr)',
-              gap: '5px', marginBottom: '10px', flexShrink: 0,
+              gap: '5px', marginBottom: '8px', flexShrink: 0,
             }}>
               <button className="btn bgh bsm" onClick={selectAllVisible}>✅ Visible ({filtered.length})</button>
               <button className="btn bgh bsm" onClick={clearAllVisible}>❌ Clear Visible</button>
               <button className="btn bgh bsm" onClick={selectAllInList}>✅ All ({allServices.length})</button>
               <button className="btn bgh bsm" onClick={clearAll}>🗑 Clear All</button>
+            </div>
+            {/* Save button — placed here so it's always visible, never scrolls away */}
+            <div style={{ flexShrink: 0, marginBottom: '8px' }}>
+              <button className="btn bp blg bw" onClick={handleSave} disabled={saving}
+                style={{ width: '100%' }}>
+                {saving ? '⏳ Saving...' : `💾 Save Selection (${selected.size} services)`}
+              </button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               {filtered.length === 0 ? (
@@ -219,13 +226,6 @@ function ServicePickerModal({
                   );
                 })
               )}
-            </div>
-            {/* Save button — sticky at bottom, never goes off screen */}
-            <div style={{ flexShrink: 0, paddingTop: '10px', borderTop: '1px solid var(--br)', marginTop: '4px' }}>
-              <button className="btn bp blg bw" onClick={handleSave} disabled={saving}
-                style={{ width: '100%', position: 'relative' }}>
-                {saving ? '⏳ Saving...' : `💾 Save Selection (${selected.size} services)`}
-              </button>
             </div>
           </>
         )}
@@ -1018,12 +1018,14 @@ export default function AdminManageFilters({ user }) {
   };
 
   // ── Save service associations ─────────────────────────
-  // Chunked to support 100,000+ services without hitting Supabase's 1000-row limit
-  const SAVE_CHUNK = 5000;
+  // SAVE_CHUNK=500: Supabase caps both upsert body rows and .in() filter
+  // values at 1000 per request. Using 500 gives a safe margin.
+  const SAVE_CHUNK = 500;
   const chunkArr = (arr, size) => { const c = []; for (let i = 0; i < arr.length; i += size) c.push(arr.slice(i, i + size)); return c; };
 
-  const handleSaveServices = async (addedIds, removedIds) => {
-    const { stage, item } = pickerModal;
+  // stage and item passed directly — never read from pickerModal state
+  // to avoid stale closure when realtime reloads fire during a save.
+  const handleSaveServices = async (addedIds, removedIds, stage, item) => {
     try {
       if (stage === 1) {
         for (const chunk of chunkArr(removedIds, SAVE_CHUNK))
@@ -1059,8 +1061,7 @@ export default function AdminManageFilters({ user }) {
   };
 
   // ── Save filter links (Stage 1→2 or Stage 2→3) ───────
-  const handleSaveFilterLinks = async (addedIds, removedIds) => {
-    const { stage, item } = linkerModal;
+  const handleSaveFilterLinks = async (addedIds, removedIds, stage, item) => {
     try {
       if (stage === 1) {
         // Link service types to this platform
@@ -1072,7 +1073,7 @@ export default function AdminManageFilters({ user }) {
             chunk.map(stid => ({ platform_id: item.id, service_type_id: stid })),
             { onConflict: 'platform_id,service_type_id' }
           );
-        showToast(`Stage 2 filters linked to "${item.name}"! Marketplace will now show only these service types when user selects this platform.`);
+        showToast(`Stage 2 filters linked to "${item.name}"!`);
       } else if (stage === 2) {
         // Link filter types to this service type
         for (const chunk of chunkArr(removedIds, SAVE_CHUNK))
@@ -1083,7 +1084,7 @@ export default function AdminManageFilters({ user }) {
             chunk.map(ftid => ({ service_type_id: item.id, filter_type_id: ftid })),
             { onConflict: 'service_type_id,filter_type_id' }
           );
-        showToast(`Stage 3 filters linked to "${item.name}"! Marketplace will now show only these filter types when user selects this service type.`);
+        showToast(`Stage 3 filters linked to "${item.name}"!`);
       }
       setLinkerModal(null);
       await loadAll();
@@ -1459,7 +1460,7 @@ CREATE POLICY "write_stft" ON filter_service_type_filter_types FOR ALL USING (au
           }
           allServices={pickerModal.poolServices}
           alreadyLinked={pickerModal.alreadyLinked}
-          onSave={handleSaveServices}
+          onSave={(added, removed) => handleSaveServices(added, removed, pickerModal.stage, pickerModal.item)}
           onClose={() => setPickerModal(null)}
           customPrices={customPrices}
           onSavePrices={handleSavePrices}
@@ -1474,7 +1475,7 @@ CREATE POLICY "write_stft" ON filter_service_type_filter_types FOR ALL USING (au
           allItems={serviceTypes.filter(st => st.slug !== 'all')}
           linked={platformServiceTypeMap[linkerModal.item.id] || new Set()}
           itemColor="#7b2fff"
-          onSave={handleSaveFilterLinks}
+          onSave={(added, removed) => handleSaveFilterLinks(added, removed, linkerModal.stage, linkerModal.item)}
           onClose={() => setLinkerModal(null)}
         />
       )}
@@ -1486,7 +1487,7 @@ CREATE POLICY "write_stft" ON filter_service_type_filter_types FOR ALL USING (au
           allItems={filterTypes.filter(ft => ft.slug !== 'all')}
           linked={serviceTypeFilterTypeMap[linkerModal.item.id] || new Set()}
           itemColor="#ffd700"
-          onSave={handleSaveFilterLinks}
+          onSave={(added, removed) => handleSaveFilterLinks(added, removed, linkerModal.stage, linkerModal.item)}
           onClose={() => setLinkerModal(null)}
         />
       )}
