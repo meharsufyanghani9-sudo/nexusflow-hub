@@ -56,6 +56,9 @@ function ServicePickerModal({
     return m;
   });
   const [savingPrices, setSavingPrices] = useState(false);
+  // Price-tab independent search + selection (separate from the services-tab selection)
+  const [priceSearch,    setPriceSearch]    = useState('');
+  const [priceSelected,  setPriceSelected]  = useState(new Set(alreadyLinked));
 
   const filtered = allServices.filter(s => {
     if (!search) return true;
@@ -86,7 +89,7 @@ function ServicePickerModal({
   const applyBulkPercent = () => {
     const pct = parseFloat(bulkPercent);
     if (!pct || isNaN(pct)) return;
-    const inFilter = allServices.filter(s => selected.has(s.id));
+    const inFilter = allServices.filter(s => priceSelected.has(s.id));
     setPriceEdits(prev => {
       const m = new Map(prev);
       for (const s of inFilter) {
@@ -109,7 +112,15 @@ function ServicePickerModal({
     setSavingPrices(false);
   };
 
-  const servicesInFilter = allServices.filter(s => selected.has(s.id));
+  const servicesInFilter    = allServices.filter(s => selected.has(s.id));
+  const priceFilteredList   = allServices.filter(s => {
+    if (!priceSearch) return true;
+    const q = priceSearch.toLowerCase();
+    return (s.name || '').toLowerCase().includes(q) ||
+           (s.platform || '').toLowerCase().includes(q) ||
+           String(s.provider_service_id || '').includes(q);
+  });
+  const servicesForPricing  = allServices.filter(s => priceSelected.has(s.id));
 
   return (
     <div className="mlay" onClick={onClose} style={{ zIndex: 800 }}>
@@ -156,7 +167,7 @@ function ServicePickerModal({
               <button className="btn bgh bsm" onClick={selectAllInList}>✅ All ({allServices.length})</button>
               <button className="btn bgh bsm" onClick={clearAll}>🗑 Clear All</button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               {filtered.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>No services found</div>
               ) : (
@@ -209,15 +220,20 @@ function ServicePickerModal({
                 })
               )}
             </div>
-            <button className="btn bp blg bw" onClick={handleSave} disabled={saving} style={{ flexShrink: 0 }}>
-              {saving ? '⏳ Saving...' : `💾 Save Selection (${selected.size} services)`}
-            </button>
+            {/* Save button — sticky at bottom, never goes off screen */}
+            <div style={{ flexShrink: 0, paddingTop: '10px', borderTop: '1px solid var(--br)', marginTop: '4px' }}>
+              <button className="btn bp blg bw" onClick={handleSave} disabled={saving}
+                style={{ width: '100%', position: 'relative' }}>
+                {saving ? '⏳ Saving...' : `💾 Save Selection (${selected.size} services)`}
+              </button>
+            </div>
           </>
         )}
 
         {tab === 'prices' && (
           <>
-            <div style={{ marginBottom: '12px', flexShrink: 0 }}>
+            {/* Price mode selector */}
+            <div style={{ marginBottom: '10px', flexShrink: 0 }}>
               <div style={{ fontSize: '9px', color: 'var(--text3)', marginBottom: '7px',
                 textTransform: 'uppercase', letterSpacing: '2px' }}>Price Edit Mode</div>
               <div style={{ display: 'flex', gap: '6px' }}>
@@ -231,12 +247,38 @@ function ServicePickerModal({
                 </button>
               </div>
             </div>
+
+            {/* Service selector for price tab — search + select which services to edit */}
+            <div style={{ marginBottom: '8px', flexShrink: 0 }}>
+              <input className="srch-inp" style={{ width: '100%', boxSizing: 'border-box' }}
+                placeholder="🔍 Search services to edit prices..."
+                value={priceSearch} onChange={e => setPriceSearch(e.target.value)} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '5px', marginBottom: '8px', flexShrink: 0 }}>
+              <button className="btn bgh bsm"
+                onClick={() => setPriceSelected(prev => { const n = new Set(prev); priceFilteredList.forEach(s => n.add(s.id)); return n; })}>
+                ✅ Select Visible ({priceFilteredList.length})
+              </button>
+              <button className="btn bgh bsm"
+                onClick={() => setPriceSelected(prev => { const n = new Set(prev); priceFilteredList.forEach(s => n.delete(s.id)); return n; })}>
+                ❌ Clear Visible
+              </button>
+              <button className="btn bgh bsm"
+                onClick={() => setPriceSelected(new Set(allServices.map(s => s.id)))}>
+                ✅ All ({allServices.length})
+              </button>
+              <button className="btn bgh bsm" onClick={() => setPriceSelected(new Set())}>
+                🗑 Clear All
+              </button>
+            </div>
+
+            {/* Bulk % panel — only in percent mode */}
             {priceMode === 'percent' && (
-              <div style={{ padding: '12px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0,
+              <div style={{ padding: '10px 14px', borderRadius: '8px', marginBottom: '10px', flexShrink: 0,
                 background: 'rgba(0,212,255,.04)', border: '1px solid rgba(0,212,255,.15)' }}>
                 <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '8px',
                   textTransform: 'uppercase', letterSpacing: '1.5px' }}>
-                  Applies to all {servicesInFilter.length} selected services
+                  Applies to {priceSelected.size} selected service{priceSelected.size !== 1 ? 's' : ''}
                 </div>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
                   <select className="sel" value={bulkDirection} onChange={e => setBulkDirection(e.target.value)} style={{ width: '120px' }}>
@@ -246,57 +288,108 @@ function ServicePickerModal({
                   <input className="inp" type="number" placeholder="e.g. 10"
                     value={bulkPercent} onChange={e => setBulkPercent(e.target.value)} style={{ width: '90px' }} />
                   <span style={{ fontSize: '12px', color: 'var(--text3)' }}>%</span>
-                  <button className="btn bp bsm" onClick={applyBulkPercent}>⚡ Apply</button>
+                  <button className="btn bp bsm" onClick={applyBulkPercent}
+                    disabled={priceSelected.size === 0 || !bulkPercent}>⚡ Apply</button>
                 </div>
                 <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '6px' }}>
                   Example: 10% increase on $1.00 → $1.10 per 1k
                 </div>
               </div>
             )}
-            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
-              {servicesInFilter.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
-                  No services selected yet. Go to "Select Services" tab first.
-                </div>
+
+            {/* Scrollable list: show selected services with price inputs */}
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+              {priceMode === 'percent' ? (
+                /* In percent mode: show checkboxes to pick services */
+                priceFilteredList.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
+                    No services found. Try a different search.
+                  </div>
+                ) : (
+                  priceFilteredList.map(s => {
+                    const isOn = priceSelected.has(s.id);
+                    const hasCustom = customPrices?.[s.id] != null;
+                    return (
+                      <div key={s.id} onClick={() => setPriceSelected(prev => { const n = new Set(prev); n.has(s.id) ? n.delete(s.id) : n.add(s.id); return n; })}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '10px',
+                          padding: '9px 12px', borderRadius: '8px', marginBottom: '4px',
+                          cursor: 'pointer', transition: 'all .12s',
+                          background: isOn ? 'rgba(123,47,255,.08)' : 'rgba(0,0,0,.2)',
+                          border: `1px solid ${isOn ? 'rgba(123,47,255,.4)' : 'var(--br)'}`,
+                        }}>
+                        <div style={{
+                          width: '18px', height: '18px', borderRadius: '4px', flexShrink: 0,
+                          border: `2px solid ${isOn ? '#b07eff' : 'var(--br2)'}`,
+                          background: isOn ? '#b07eff' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '10px', color: '#000', fontWeight: 900,
+                        }}>
+                          {isOn ? '✓' : ''}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
+                          <div style={{ fontSize: '9px', color: 'var(--text3)' }}>
+                            {s.platform} · <span style={{ color: 'var(--gold)' }}>${parseFloat(s.price_per_1k).toFixed(4)}/1k</span>
+                            {hasCustom && <span style={{ marginLeft: '6px', color: 'var(--neon)' }}>Custom: ${parseFloat(customPrices[s.id]).toFixed(4)}/1k</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
               ) : (
-                servicesInFilter.map(s => {
-                  const origPrice = parseFloat(s.price_per_1k).toFixed(6);
-                  const editVal   = priceEdits.get(s.id) ?? '';
-                  const hasCustom = customPrices?.[s.id] != null;
-                  return (
-                    <div key={s.id} style={{ padding: '10px 12px', borderRadius: '8px', marginBottom: '6px',
-                      background: 'rgba(0,0,0,.2)', border: '1px solid var(--br)' }}>
-                      <div style={{ flex: 1, minWidth: 0, marginBottom: '6px' }}>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {s.name}
+                /* In manual mode: show price input for each selected service */
+                servicesForPricing.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px' }}>
+                    Select services above using Search + checkboxes, then edit their prices here.
+                  </div>
+                ) : (
+                  servicesForPricing.map(s => {
+                    const origPrice = parseFloat(s.price_per_1k).toFixed(6);
+                    const editVal   = priceEdits.get(s.id) ?? '';
+                    const hasCustom = customPrices?.[s.id] != null;
+                    return (
+                      <div key={s.id} style={{ padding: '10px 12px', borderRadius: '8px', marginBottom: '6px',
+                        background: 'rgba(0,0,0,.2)', border: '1px solid var(--br)' }}>
+                        <div style={{ flex: 1, minWidth: 0, marginBottom: '6px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {s.name}
+                          </div>
+                          <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '2px' }}>
+                            Original: <span style={{ color: 'var(--gold)' }}>${origPrice}/1k</span>
+                            {hasCustom && (
+                              <span style={{ marginLeft: '8px', color: 'var(--neon)' }}>
+                                Custom: ${parseFloat(customPrices[s.id]).toFixed(6)}/1k
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div style={{ fontSize: '9px', color: 'var(--text3)', marginTop: '2px' }}>
-                          Original: <span style={{ color: 'var(--gold)' }}>${origPrice}/1k</span>
-                          {hasCustom && (
-                            <span style={{ marginLeft: '8px', color: 'var(--neon)' }}>
-                              Current custom: ${parseFloat(customPrices[s.id]).toFixed(6)}/1k
-                            </span>
-                          )}
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text3)', flexShrink: 0 }}>$ New Price</span>
+                          <input className="inp" type="number" step="0.0001"
+                            placeholder={origPrice} value={editVal}
+                            onChange={e => setPrice(s.id, e.target.value)}
+                            style={{ flex: 1, padding: '6px 10px' }} />
+                          <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>/1k</span>
+                          {editVal && <button className="btn bgh bsm" onClick={() => setPrice(s.id, '')}>↺</button>}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text3)', flexShrink: 0 }}>$ New Price</span>
-                        <input className="inp" type="number" step="0.0001"
-                          placeholder={origPrice} value={editVal}
-                          onChange={e => setPrice(s.id, e.target.value)}
-                          style={{ flex: 1, padding: '6px 10px' }} />
-                        <span style={{ fontSize: '10px', color: 'var(--text3)', flexShrink: 0 }}>/1k</span>
-                        {editVal && <button className="btn bgh bsm" onClick={() => setPrice(s.id, '')}>↺</button>}
-                      </div>
-                    </div>
-                  );
-                })
+                    );
+                  })
+                )
               )}
             </div>
-            <button className="btn bp blg bw" onClick={handleSavePrices} disabled={savingPrices} style={{ flexShrink: 0 }}>
-              {savingPrices ? '⏳ Saving...' : '💾 Save Custom Prices'}
-            </button>
+
+            {/* Save prices button — always at bottom */}
+            <div style={{ flexShrink: 0, paddingTop: '10px', borderTop: '1px solid var(--br)', marginTop: '4px' }}>
+              <button className="btn bp blg bw" onClick={handleSavePrices} disabled={savingPrices}
+                style={{ width: '100%' }}>
+                {savingPrices ? '⏳ Saving...' : `💾 Save Custom Prices${priceEdits.size > 0 ? ` (${priceEdits.size} edited)` : ''}`}
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -703,14 +796,15 @@ export default function AdminManageFilters({ user }) {
         }
       };
 
-      // Supabase default cap is 1000 rows per request. This loops until done.
-      // optional=true means the table may not exist yet (new tables added by migration)
-      // — in that case we silently return [] instead of crashing the whole page.
-      // FIX Phase-7: was while(true) — capped at MAX_ITER (100 × 100,000 = 10M rows)
-      // to prevent an infinite loop if Supabase returns unexpected paginated data.
+      // Supabase hard-caps every response at 1000 rows regardless of the range
+      // requested — asking for .range(0, 99999) still returns at most 1000 rows,
+      // so the old JB=100000 code always got exactly 1000 rows, thought it was
+      // done (data.length < JB), and broke — leaving junction tables half-loaded.
+      // Fix: use JB=1000 so the exit condition (data.length < JB) only fires
+      // when Supabase actually returned a partial page (i.e. we're truly at the end).
       const fetchAll = async (table, selectCols = '*', optional = false) => {
-        const JB       = 100000; // batch size — larger = fewer round trips
-        const MAX_ITER = 100;    // hard cap: 100 × 100,000 = 10,000,000 rows max
+        const JB       = 1000;   // must match Supabase's actual per-request row cap
+        const MAX_ITER = 10000;  // hard safety cap: 10,000 × 1000 = 10M rows max
         let rows = [];
         let f    = 0;
         for (let iter = 0; iter < MAX_ITER; iter++) {
@@ -723,7 +817,7 @@ export default function AdminManageFilters({ user }) {
           }
           if (!data || data.length === 0) break;
           rows = [...rows, ...data];
-          if (data.length < JB) break;
+          if (data.length < JB) break; // partial page = end of table
           f += JB;
         }
         return rows;
@@ -859,43 +953,24 @@ export default function AdminManageFilters({ user }) {
   };
 
   // ── Open service picker (links services to a filter) ──
+  // Always passes ALL services as pool so admin can assign any of 2500+ services
+  // to any filter at any stage without being blocked by parent-filter restrictions.
   const openPicker = (stage, item) => {
-    let poolServices  = [];
     let alreadyLinked = new Set();
 
     if (stage === 1) {
       setActivePlatformId(item.id);
-      poolServices  = allServices;
       alreadyLinked = platformServiceMap[item.id] || new Set();
     } else if (stage === 2) {
       setActiveServiceTypeId(item.id);
-      if (activePlatformId && platformServiceMap[activePlatformId]) {
-        const allowedIds = platformServiceMap[activePlatformId];
-        poolServices = allServices.filter(s => allowedIds.has(s.id));
-      } else {
-        const platformLinkedIds = new Set();
-        Object.values(platformServiceMap).forEach(set => set.forEach(id => platformLinkedIds.add(id)));
-        poolServices = platformLinkedIds.size > 0
-          ? allServices.filter(s => platformLinkedIds.has(s.id))
-          : allServices;
-      }
       alreadyLinked = serviceTypeMap[item.id] || new Set();
     } else if (stage === 3) {
       setActiveFilterTypeId(item.id);
-      if (activeServiceTypeId && serviceTypeMap[activeServiceTypeId]) {
-        const allowedIds = serviceTypeMap[activeServiceTypeId];
-        poolServices = allServices.filter(s => allowedIds.has(s.id));
-      } else {
-        const serviceTypeLinkedIds = new Set();
-        Object.values(serviceTypeMap).forEach(set => set.forEach(id => serviceTypeLinkedIds.add(id)));
-        poolServices = serviceTypeLinkedIds.size > 0
-          ? allServices.filter(s => serviceTypeLinkedIds.has(s.id))
-          : allServices;
-      }
       alreadyLinked = filterTypeMap[item.id] || new Set();
     }
 
-    setPickerModal({ stage, item, poolServices, alreadyLinked });
+    // Always use the full service pool so admin can reach every service
+    setPickerModal({ stage, item, poolServices: allServices, alreadyLinked });
   };
 
   // ── Open filter linker ────────────────────────────────
