@@ -22,7 +22,7 @@ export default function Landing({ onAuth }) {
 
   const platforms = [
     { ic: '📸', name: 'Instagram', color: '#E1306C' },
-    { ic: '🎵', name: 'TikTok', color: '#00d4ff' },
+    { ic: '🎵', name: 'TikTok', color: '#00e5ff' },
     { ic: '▶️', name: 'YouTube', color: '#FF0000' },
     { ic: '🐦', name: 'Twitter', color: '#1DA1F2' },
     { ic: '👤', name: 'Facebook', color: '#1877F2' },
@@ -58,68 +58,72 @@ export default function Landing({ onAuth }) {
     <div style={{ position: 'relative', zIndex: 10 }}>
       <div className="gbg" />
 
-      {/* NAVBAR */}
-      <nav style={{
-        position: 'sticky', top: 0, zIndex: 100,
-        background: 'rgba(2,4,8,.95)', backdropFilter: 'blur(16px)',
-        borderBottom: '1px solid var(--br)', padding: '0 20px',
-        height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-      }}>
+      {/* ── NAVBAR ── */}
+      <nav className="landing-nav">
         <div style={{
-          fontFamily: 'var(--fd)', fontSize: 'clamp(14px,3vw,20px)', fontWeight: 900,
+          fontFamily: 'Orbitron, monospace', fontSize: 'clamp(14px,3vw,20px)', fontWeight: 900,
           letterSpacing: '2px', background: 'linear-gradient(135deg,var(--neon),var(--gold))',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
         }}>
           NEXUS<span style={{ WebkitTextFillColor: 'var(--neon)' }}>FLOW</span>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '10px' }}>
           <button className="btn bgh bsm" onClick={() => onAuth('login')}>Login</button>
           <button className="btn bp bsm" onClick={() => onAuth('signup')}>Sign Up Free</button>
         </div>
       </nav>
 
-      {/* HERO */}
-      <section style={{ padding: '60px 20px 40px', textAlign: 'center', maxWidth: '700px', margin: '0 auto' }}>
-        <div style={{
-          fontFamily: 'var(--fd)', fontSize: '9px', letterSpacing: '5px',
-          color: 'var(--neon)', textTransform: 'uppercase', marginBottom: '16px'
-        }}>
-          🚀 Multi-Vendor SMM Marketplace
+      {/* ── HERO ── */}
+      <section style={{ padding: 'clamp(48px,8vw,80px) 24px 40px', textAlign: 'center', maxWidth: '760px', margin: '0 auto' }}>
+        {/* Eyebrow badge */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+          <div className="hero-eyebrow">
+            <span>🚀</span> Multi-Vendor SMM Marketplace
+          </div>
         </div>
-        <h1 style={{ fontFamily: 'var(--fd)', fontSize: 'clamp(28px,6vw,52px)', fontWeight: 900, lineHeight: 1.1, marginBottom: '16px' }}>
+
+        {/* Headline */}
+        <h1 style={{
+          fontFamily: 'Orbitron, monospace',
+          fontSize: 'clamp(32px,6vw,58px)',
+          fontWeight: 900, lineHeight: 1.08, marginBottom: '20px', letterSpacing: '-1px',
+        }}>
           <span style={{
-            background: 'linear-gradient(135deg,var(--neon),var(--gold),var(--purple))',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'
+            background: 'linear-gradient(135deg,var(--neon) 0%,var(--gold) 50%,var(--purple) 100%)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+            display: 'block',
           }}>
             NEXUSFLOW HUB
           </span>
         </h1>
+
+        {/* Subtitle */}
         <p style={{
-          fontSize: 'clamp(13px,2vw,16px)', color: 'var(--text2)', lineHeight: 1.7,
-          marginBottom: '28px', maxWidth: '500px', margin: '0 auto 28px'
+          fontSize: 'clamp(14px,2vw,17px)', color: 'var(--text2)', lineHeight: 1.75,
+          marginBottom: '32px', maxWidth: '520px', margin: '0 auto 32px',
         }}>
-          The safest SMM marketplace with escrow protection, multi-vendor support and instant order processing.
+          The safest SMM marketplace with escrow protection,<br />
+          multi-vendor support and instant order processing.
         </p>
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+
+        {/* CTAs */}
+        <div style={{ display: 'flex', gap: '14px', justifyContent: 'center', flexWrap: 'wrap' }}>
           <button className="btn bp blg" onClick={() => onAuth('signup')}>
             🛒 Start Buying Free →
           </button>
           <button className="btn bpu blg" onClick={() => setShowReseller(true)}>
-            🏪 Become a Reseller
+            👑 Become a Reseller
           </button>
         </div>
       </section>
 
-      {/* PLATFORMS */}
-      <section style={{ padding: '20px', maxWidth: '700px', margin: '0 auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '40px' }}>
+      {/* ── PLATFORM PILLS ── */}
+      <section style={{ padding: '20px 24px 0', maxWidth: '760px', margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '48px' }}>
           {platforms.map((p, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              padding: '8px 14px', borderRadius: '20px',
-              border: `1px solid ${p.color}30`,
-              background: `${p.color}10`, fontSize: '12px', fontWeight: 700,
-              color: p.color,
+            <div key={i} className="platform-pill" style={{
+              border: `1px solid ${p.color}35`, background: `${p.color}12`,
+              color: p.color, fontSize: '12px', fontWeight: 700,
             }}>
               <span>{p.ic}</span><span>{p.name}</span>
             </div>
@@ -127,188 +131,183 @@ export default function Landing({ onAuth }) {
         </div>
       </section>
 
-      {/* LIVE STATS */}
-      <section style={{ padding: '0 20px', maxWidth: '900px', margin: '0 auto' }}>
+      <div className="glow-line-h" style={{ maxWidth: '900px', margin: '0 auto 40px', opacity: .2 }} />
+
+      {/* ── LIVE STATS ── */}
+      <section style={{ padding: '0 24px', maxWidth: '960px', margin: '0 auto 48px' }}>
         <LiveStats />
       </section>
 
-      {/* BUYER vs RESELLER COMPARISON */}
-      <section style={{ padding: '20px', maxWidth: '900px', margin: '0 auto' }}>
+      {/* ── BUYER vs RESELLER ── */}
+      <section style={{ padding: '0 24px 48px', maxWidth: '960px', margin: '0 auto' }}>
         <div style={{
-          fontFamily: 'var(--fd)', fontSize: '9px', letterSpacing: '4px',
-          color: 'var(--text3)', textTransform: 'uppercase', textAlign: 'center', marginBottom: '24px'
+          fontFamily: 'Orbitron, monospace', fontSize: '9px', letterSpacing: '4px',
+          color: 'var(--text3)', textTransform: 'uppercase', textAlign: 'center', marginBottom: '28px',
         }}>
           Choose Your Account Type
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '16px', marginBottom: '40px' }}>
-          {/* Buyer Card */}
-          <div className="card" style={{ padding: '24px', border: '1px solid rgba(0,212,255,.25)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '36px', marginBottom: '8px' }}>🛒</div>
-              <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 900, color: 'var(--neon)', marginBottom: '4px' }}>BUYER</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Buy SMM services for yourself</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '20px' }}>
+
+          {/* Buyer */}
+          <div className="compare-card compare-card-buyer">
+            <div style={{ textAlign: 'center', marginBottom: '22px' }}>
+              <div style={{ fontSize: '40px', marginBottom: '10px', filter: 'drop-shadow(0 4px 12px rgba(0,229,255,.2))' }}>🛒</div>
+              <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '16px', fontWeight: 900, color: 'var(--neon)', marginBottom: '5px' }}>BUYER</div>
+              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Buy SMM services for yourself</div>
             </div>
             {buyerBenefits.map((b, i) => (
-              <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'flex-start' }}>
-                <span style={{ fontSize: '14px', flexShrink: 0 }}>{b.ic}</span>
-                <span style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.5 }}>{b.text}</span>
+              <div key={i} style={{ display: 'flex', gap: '11px', marginBottom: '12px', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '15px', flexShrink: 0 }}>{b.ic}</span>
+                <span style={{ fontSize: '13px', color: 'var(--text2)', lineHeight: 1.55 }}>{b.text}</span>
               </div>
             ))}
-            <button className="btn bp bmd bw" style={{ marginTop: '16px', width: '100%' }} onClick={() => onAuth('signup')}>
+            <button className="btn bp bmd bw" style={{ marginTop: '20px' }} onClick={() => onAuth('signup')}>
               Create Buyer Account →
             </button>
           </div>
 
-          {/* Reseller Card */}
-          <div className="card" style={{ padding: '24px', border: '1px solid rgba(255,180,0,.25)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '36px', marginBottom: '8px' }}>👑</div>
-              <div style={{ fontFamily: 'var(--fd)', fontSize: '16px', fontWeight: 900, color: 'var(--gold)', marginBottom: '4px' }}>RESELLER</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Sell services & earn money</div>
+          {/* Reseller */}
+          <div className="compare-card compare-card-reseller">
+            <div style={{ textAlign: 'center', marginBottom: '22px' }}>
+              <div style={{ fontSize: '40px', marginBottom: '10px', filter: 'drop-shadow(0 4px 12px rgba(255,215,0,.2))' }}>👑</div>
+              <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '16px', fontWeight: 900, color: 'var(--gold)', marginBottom: '5px' }}>RESELLER</div>
+              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Sell services & earn money</div>
             </div>
             {resellerBenefits.map((b, i) => (
-              <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'flex-start' }}>
-                <span style={{ fontSize: '14px', flexShrink: 0 }}>{b.ic}</span>
-                <span style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.5 }}>{b.text}</span>
+              <div key={i} style={{ display: 'flex', gap: '11px', marginBottom: '12px', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '15px', flexShrink: 0 }}>{b.ic}</span>
+                <span style={{ fontSize: '13px', color: 'var(--text2)', lineHeight: 1.55 }}>{b.text}</span>
               </div>
             ))}
-            <div style={{ marginTop: '16px', padding: '10px 14px', borderRadius: '8px',
-              background: 'rgba(255,180,0,.08)', border: '1px solid rgba(255,180,0,.2)',
-              fontSize: '11px', color: 'var(--gold)', marginBottom: '10px', lineHeight: 1.6 }}>
+            <div style={{
+              marginTop: '16px', padding: '11px 14px', borderRadius: '9px',
+              background: 'rgba(255,215,0,.07)', border: '1px solid rgba(255,215,0,.18)',
+              fontSize: '12px', color: 'var(--warn)', marginBottom: '12px', lineHeight: 1.65,
+            }}>
               ⚠️ Reseller accounts are created by admin only. Contact us to apply.
             </div>
-            <button className="btn bgo bmd bw" style={{ width: '100%' }} onClick={() => setShowReseller(true)}>
+            <button className="btn bgo bmd bw" onClick={() => setShowReseller(true)}>
               👑 Apply to Become Reseller →
             </button>
           </div>
         </div>
       </section>
 
-      {/* FEATURES */}
-      <section style={{ padding: '20px', maxWidth: '900px', margin: '0 auto' }}>
+      <div className="glow-line-h" style={{ maxWidth: '900px', margin: '0 auto 48px', opacity: .15 }} />
+
+      {/* ── FEATURES ── */}
+      <section style={{ padding: '0 24px 56px', maxWidth: '960px', margin: '0 auto' }}>
         <div style={{
-          fontFamily: 'var(--fd)', fontSize: '9px', letterSpacing: '4px',
-          color: 'var(--text3)', textTransform: 'uppercase', textAlign: 'center', marginBottom: '24px'
+          fontFamily: 'Orbitron, monospace', fontSize: '9px', letterSpacing: '4px',
+          color: 'var(--text3)', textTransform: 'uppercase', textAlign: 'center', marginBottom: '28px',
         }}>
           Why Choose NexusFlow
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '14px', marginBottom: '40px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '16px' }}>
           {features.map((f, i) => (
-            <div key={i} className="card" style={{ padding: '20px', textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', marginBottom: '10px' }}>{f.ic}</div>
-              <div style={{ fontFamily: 'var(--fd)', fontSize: '11px', fontWeight: 700, color: 'var(--neon)', letterSpacing: '1px', marginBottom: '8px' }}>
+            <div key={i} className="feature-card">
+              <div className="feature-icon">{f.ic}</div>
+              <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '11px', fontWeight: 700, color: 'var(--neon)', letterSpacing: '1px', marginBottom: '10px' }}>
                 {f.tl}
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text2)', lineHeight: 1.6 }}>{f.tx}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.65 }}>{f.tx}</div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* HOW IT WORKS */}
-      <section style={{ padding: '20px', maxWidth: '900px', margin: '0 auto' }}>
+      {/* ── HOW IT WORKS ── */}
+      <section style={{ padding: '0 24px 56px', maxWidth: '960px', margin: '0 auto' }}>
         <div style={{
-          fontFamily: 'var(--fd)', fontSize: '9px', letterSpacing: '4px',
-          color: 'var(--text3)', textTransform: 'uppercase', textAlign: 'center', marginBottom: '24px'
+          fontFamily: 'Orbitron, monospace', fontSize: '9px', letterSpacing: '4px',
+          color: 'var(--text3)', textTransform: 'uppercase', textAlign: 'center', marginBottom: '28px',
         }}>
           How It Works
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '14px', marginBottom: '40px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: '16px' }}>
           {steps.map((s, i) => (
-            <div key={i} className="card" style={{ padding: '20px', textAlign: 'center' }}>
-              <div style={{
-                fontFamily: 'var(--fd)', fontSize: '28px', fontWeight: 900,
-                color: 'rgba(0,212,255,.15)', marginBottom: '8px'
-              }}>{s.n}</div>
-              <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '8px', color: 'var(--text)' }}>{s.tl}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text2)', lineHeight: 1.6 }}>{s.tx}</div>
+            <div key={i} className="step-card">
+              <div className="step-number">{s.n}</div>
+              <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '10px', color: 'var(--text)', position: 'relative', zIndex: 1 }}>{s.tl}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.65, position: 'relative', zIndex: 1 }}>{s.tx}</div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* CTA */}
-      <section style={{ padding: '40px 20px 60px', textAlign: 'center' }}>
-        <div style={{
-          maxWidth: '500px', margin: '0 auto',
-          padding: '32px', borderRadius: '16px',
-          background: 'linear-gradient(135deg,rgba(0,212,255,.08),rgba(123,47,255,.08))',
-          border: '1px solid rgba(0,212,255,.2)'
-        }}>
-          <div style={{ fontFamily: 'var(--fd)', fontSize: 'clamp(18px,4vw,28px)', fontWeight: 900, marginBottom: '12px' }}>
+      {/* ── CTA ── */}
+      <section style={{ padding: '0 24px 72px', maxWidth: '600px', margin: '0 auto' }}>
+        <div className="cta-box">
+          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 'clamp(18px,4vw,30px)', fontWeight: 900, marginBottom: '14px' }}>
             Ready to Start?
           </div>
-          <div style={{ fontSize: '13px', color: 'var(--text2)', marginBottom: '24px', lineHeight: 1.7 }}>
+          <div style={{ fontSize: '14px', color: 'var(--text2)', marginBottom: '28px', lineHeight: 1.75, maxWidth: '400px', margin: '0 auto 28px' }}>
             Join thousands of buyers and resellers on NexusFlow HUB. Free to sign up, no hidden fees.
           </div>
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
             <button className="btn bp blg" onClick={() => onAuth('signup')}>Create Free Account →</button>
             <button className="btn bgh blg" onClick={() => onAuth('login')}>Sign In</button>
           </div>
         </div>
       </section>
 
-      {/* FOOTER */}
-      <footer style={{
-        textAlign: 'center', padding: '20px',
-        borderTop: '1px solid var(--br)',
-        fontSize: '11px', color: 'var(--text3)'
-      }}>
+      {/* ── FOOTER ── */}
+      <footer className="landing-footer">
         © {new Date().getFullYear()} NexusFlow HUB · Multi-Vendor SMM Marketplace
       </footer>
 
-      {/* ─── RESELLER INFO MODAL ─── */}
+      {/* ── RESELLER MODAL ── */}
       {showReseller && (
-        <div className="mlay" onClick={e => e.target.classList.contains('mlay') && setShowReseller(false)}
-          style={{ zIndex: 9999 }}>
-          <div className="mbox" style={{ maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <div className="mlay" onClick={e => e.target.classList.contains('mlay') && setShowReseller(false)} style={{ zIndex: 9999 }}>
+          <div className="mbox" style={{ maxWidth: '490px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '22px' }}>
               <div className="mttl">👑 Become a Reseller</div>
-              <button onClick={() => setShowReseller(false)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => setShowReseller(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '20px', cursor: 'pointer', lineHeight: 1, minWidth: '32px', minHeight: '32px' }}
+                aria-label="Close modal">✕</button>
             </div>
-
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '8px' }}>👑</div>
-              <div style={{ fontFamily: 'var(--fd)', fontSize: '14px', color: 'var(--gold)', fontWeight: 800 }}>
+            <div style={{ textAlign: 'center', marginBottom: '22px' }}>
+              <div style={{ fontSize: '52px', marginBottom: '10px', filter: 'drop-shadow(0 4px 16px rgba(255,215,0,.25))' }}>👑</div>
+              <div style={{ fontFamily: 'Orbitron, monospace', fontSize: '14px', color: 'var(--gold)', fontWeight: 800 }}>
                 NEXUSFLOW RESELLER PROGRAM
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '5px' }}>
                 Start earning money by reselling SMM services
               </div>
             </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--neon)', letterSpacing: '1.5px', marginBottom: '10px' }}>
-                WHAT YOU GET AS A RESELLER
+            <div style={{ marginBottom: '18px' }}>
+              <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--neon)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '12px' }}>
+                What You Get as a Reseller
               </div>
               {resellerBenefits.map((b, i) => (
-                <div key={i} style={{ display: 'flex', gap: '10px', marginBottom: '8px', alignItems: 'flex-start' }}>
-                  <span style={{ fontSize: '14px', flexShrink: 0 }}>{b.ic}</span>
-                  <span style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.5 }}>{b.text}</span>
+                <div key={i} style={{ display: 'flex', gap: '11px', marginBottom: '10px', alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: '15px', flexShrink: 0 }}>{b.ic}</span>
+                  <span style={{ fontSize: '13px', color: 'var(--text2)', lineHeight: 1.55 }}>{b.text}</span>
                 </div>
               ))}
             </div>
-
             <div style={{
-              padding: '14px', borderRadius: '10px', marginBottom: '16px',
-              background: 'rgba(255,180,0,.06)', border: '1px solid rgba(255,180,0,.2)'
+              padding: '14px', borderRadius: '10px', marginBottom: '18px',
+              background: 'rgba(255,215,0,.06)', border: '1px solid rgba(255,215,0,.18)',
             }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gold)', marginBottom: '8px' }}>
-                ⚠️ HOW TO BECOME A RESELLER
+              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gold)', marginBottom: '9px' }}>
+                ⚠️ How to Become a Reseller
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text2)', lineHeight: 1.8 }}>
-                Reseller accounts are <strong style={{ color: 'var(--gold)' }}>created by admin only</strong> — not through the normal signup page. To apply, contact our admin directly via WhatsApp. Share your name, email, and why you want to resell. Admin will review and create your reseller account within 24 hours.
+              <div style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.75 }}>
+                Reseller accounts are <strong style={{ color: 'var(--gold)' }}>created by admin only</strong> — not through the normal signup page. Contact our admin via WhatsApp with your name, email, and why you want to resell. Admin will review and create your account within 24 hours.
               </div>
             </div>
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {whatsapp ? (
-                <a href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hi, I want to become a reseller on NexusFlow HUB. Please create a reseller account for me.')}`}
-                  target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                <a
+                  href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hi, I want to become a reseller on NexusFlow HUB. Please create a reseller account for me.')}`}
+                  target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}
+                >
                   <div style={{
                     padding: '14px', borderRadius: '10px', textAlign: 'center',
-                    background: 'rgba(37,211,102,.1)', border: '1px solid rgba(37,211,102,.3)',
-                    color: '#25D366', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
+                    background: 'rgba(37,211,102,.09)', border: '1px solid rgba(37,211,102,.28)',
+                    color: '#25D366', fontWeight: 700, fontSize: '14px', cursor: 'pointer',
+                    transition: 'var(--tr)',
                   }}>
                     💬 Contact Admin on WhatsApp →
                   </div>
@@ -317,7 +316,7 @@ export default function Landing({ onAuth }) {
                 <div style={{
                   padding: '14px', borderRadius: '10px', textAlign: 'center',
                   background: 'var(--gl)', border: '1px solid var(--br)',
-                  color: 'var(--text3)', fontSize: '12px'
+                  color: 'var(--text3)', fontSize: '13px',
                 }}>
                   💬 Contact admin to get your reseller account
                 </div>
