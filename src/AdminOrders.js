@@ -68,22 +68,25 @@ export default function AdminOrders({ user }) {
     if (!window.confirm(`Refund $${parseFloat(order.cost || 0).toFixed(2)} and cancel order?`)) return;
     setUpdating(order.id);
 
-    // FIX Phase-10: re-fetch fresh order status from DB before any balance
-    // operation. Prevents double-refund if admin double-clicks the button or
-    // two admins act simultaneously on the same order.
-    const { data: freshOrder, error: freshErr } = await supabase
+    // SECURITY FIX: atomic conditional status flip.
+    // We set status → 'cancelled' in a single query that also asserts the
+    // current status is NOT already 'cancelled'. If count === 0 the order was
+    // already cancelled (by another admin tab, the user, or a prior request)
+    // and we abort before touching the balance — preventing double-refund.
+    const { data: cancelledRows, error: cancelErr } = await supabase
       .from('orders')
-      .select('status')
+      .update({ status: 'cancelled' })
       .eq('id', order.id)
-      .single();
+      .neq('status', 'cancelled')  // ← atomic guard — only succeeds once
+      .select('cost');
 
-    if (freshErr || !freshOrder) {
-      setMsg('❌ Could not verify order status. Please refresh.');
+    if (cancelErr) {
+      setMsg('❌ Could not update order status. Please refresh.');
       setUpdating(null);
       return;
     }
 
-    if (freshOrder.status === 'cancelled') {
+    if (!cancelledRows || cancelledRows.length === 0) {
       setMsg('⚠️ Order is already cancelled. No refund issued.');
       loadOrders();
       setUpdating(null);
@@ -91,20 +94,21 @@ export default function AdminOrders({ user }) {
       return;
     }
 
+    // Status flip succeeded — issue refund exactly once
+    const refundAmount = parseFloat(cancelledRows[0].cost || 0);
     const { data: profile } = await supabase
       .from('users').select('balance').eq('id', order.user_id).single();
     if (profile) {
-      const newBal = parseFloat(profile.balance || 0) + parseFloat(order.cost || 0);
+      const newBal = parseFloat(profile.balance || 0) + refundAmount;
       await supabase.from('users').update({ balance: newBal }).eq('id', order.user_id);
       await supabase.from('transactions').insert({
         user_id: order.user_id,
         type: 'refund',
-        amount: parseFloat(order.cost || 0),
+        amount: refundAmount,
         description: `Refund: Order ${order.order_ref || order.id}`,
         ref_id: order.order_ref,
       });
     }
-    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id);
     setMsg('✅ Order refunded and cancelled.');
     loadOrders();
     setTimeout(() => setMsg(''), 4000);
