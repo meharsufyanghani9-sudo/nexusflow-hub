@@ -432,6 +432,13 @@ export default function Marketplace({ user, onNav }) {
     }
     const totalCost = parseFloat(cost);
 
+    // SECURITY FIX: setOrdering(true) is now the FIRST async step — it disables
+    // the Place Order button immediately, before any network call. Previously it
+    // was set only after the balance check, leaving a window where a user could
+    // click the button multiple times in rapid succession, each time passing the
+    // balance check with the same un-deducted balance and placing duplicate orders.
+    setOrdering(true);
+
     // FIX Phase-3: Always fetch the live balance from DB before checking or
     // deducting — the prop value (user.balance) is stale after any prior order,
     // deposit approval, or admin edit that happened since the user logged in.
@@ -443,16 +450,16 @@ export default function Marketplace({ user, onNav }) {
 
     if (balFetchErr || !freshProfile) {
       setOrderError('Could not verify balance. Please refresh and try again.');
+      setOrdering(false);
       return;
     }
     const freshBalance = parseFloat(freshProfile.balance || 0);
 
     if (totalCost > freshBalance) {
       setOrderError('Insufficient balance. Please add funds.');
+      setOrdering(false);
       return;
     }
-
-    setOrdering(true);
     const orderRef = 'NF-' + Date.now();
 
     const { error: orderErr } = await supabase.from('orders').insert({
