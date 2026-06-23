@@ -149,6 +149,9 @@ export default function Orders({ user }) {
   const [loading,   setLoading]   = useState(true);
   const [filter,    setFilter]    = useState('all');
   const [actionMsg, setActionMsg] = useState('');
+  // Race-condition guard: tracks which order IDs are mid-cancel so a
+  // double-click or duplicate request cannot trigger a second refund.
+  const cancellingRef = useRef(new Set());
 
   // ── Pagination: how many filtered rows are currently shown ────────────────
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -180,57 +183,82 @@ export default function Orders({ user }) {
     return true;
   };
 
-  // FIX #5A + #5B: re-fetch status before cancel, and insert transaction log
+  // SECURITY FIX: cancelOrder is now protected against race conditions /
+  // double-refund attacks via two layers:
+  //   1. cancellingRef — in-memory Set that blocks a second call for the same
+  //      order ID before the first one has finished (handles rapid double-clicks
+  //      and concurrent tab exploitation within the same session).
+  //   2. Atomic status flip — the order status is set to 'cancelled' FIRST in a
+  //      conditional update (.eq('status','pending')). Only if that update
+  //      actually mutates a row (count === 1) do we credit the refund. This
+  //      makes the operation idempotent at the database level even if two
+  //      requests reach Supabase simultaneously from different devices/tabs.
   const cancelOrder = async (order) => {
     if (!window.confirm('Cancel this order? Your balance will be refunded.')) return;
 
-    const { data: freshOrder } = await supabase
-      .from('orders')
-      .select('status, cost')
-      .eq('id', order.id)
-      .eq('user_id', user.id)
-      .single();
+    // Layer 1 — in-process lock
+    if (cancellingRef.current.has(order.id)) return;
+    cancellingRef.current.add(order.id);
 
-    if (!freshOrder || freshOrder.status !== 'pending') {
-      setActionMsg('❌ Order cannot be cancelled. Status may have changed.');
+    try {
+      // Layer 2 — atomic conditional status flip.
+      // We update status to 'cancelled' ONLY when it is still 'pending'.
+      // Supabase returns the number of rows affected; if count === 0 the order
+      // was already cancelled (or moved to in_progress) by another request.
+      const { data: cancelledRows, error: cancelErr } = await supabase
+        .from('orders')
+        .update({ status: 'cancelled' })
+        .eq('id', order.id)
+        .eq('user_id', user.id)   // ownership check (defence-in-depth on top of RLS)
+        .eq('status', 'pending')  // ← atomic guard — only succeeds once
+        .select('cost');
+
+      if (cancelErr) {
+        setActionMsg('❌ Cancel failed. Please try again.');
+        setTimeout(() => setActionMsg(''), 4000);
+        return;
+      }
+
+      if (!cancelledRows || cancelledRows.length === 0) {
+        // Row was not in 'pending' state — already cancelled or progressed
+        setActionMsg('❌ Order cannot be cancelled. Status may have changed.');
+        setTimeout(() => setActionMsg(''), 4000);
+        loadOrders();
+        return;
+      }
+
+      // Status flip succeeded — now safely issue the refund exactly once
+      const refundAmount = parseFloat(cancelledRows[0].cost || 0);
+
+      const { data: profile } = await supabase
+        .from('users')
+        .select('balance')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile) {
+        setActionMsg('❌ Could not fetch balance. Please contact support.');
+        setTimeout(() => setActionMsg(''), 4000);
+        return;
+      }
+
+      const newBalance = parseFloat(profile.balance || 0) + refundAmount;
+
+      await supabase.from('users').update({ balance: newBalance }).eq('id', user.id);
+      await supabase.from('transactions').insert({
+        user_id:     user.id,
+        type:        'refund',
+        amount:      refundAmount,
+        description: `Cancellation refund: ${order.order_ref || order.id}`,
+        ref_id:      order.order_ref || order.id,
+      });
+
+      setActionMsg('✅ Order cancelled. Your balance has been refunded!');
+      loadOrders();
       setTimeout(() => setActionMsg(''), 4000);
-      return;
+    } finally {
+      cancellingRef.current.delete(order.id);
     }
-
-    const { data: profile } = await supabase
-      .from('users')
-      .select('balance')
-      .eq('id', user.id)
-      .single();
-
-    if (!profile) {
-      setActionMsg('❌ Could not fetch balance. Please refresh and try again.');
-      setTimeout(() => setActionMsg(''), 4000);
-      return;
-    }
-
-    const refundAmount = parseFloat(freshOrder.cost || 0);
-    const newBalance   = parseFloat(profile.balance || 0) + refundAmount;
-
-    await supabase.from('users').update({ balance: newBalance }).eq('id', user.id);
-    // FIX Phase-9: include .eq('user_id', user.id) so a user cannot cancel
-    // another user's order if they know the order UUID (defence-in-depth on
-    // top of Supabase RLS — both guards should be present).
-    await supabase.from('orders')
-      .update({ status: 'cancelled' })
-      .eq('id', order.id)
-      .eq('user_id', user.id);
-    await supabase.from('transactions').insert({
-      user_id:     user.id,
-      type:        'refund',
-      amount:      refundAmount,
-      description: `Cancellation refund: ${order.order_ref || order.id}`,
-      ref_id:      order.order_ref || order.id,
-    });
-
-    setActionMsg('✅ Order cancelled. Your balance has been refunded!');
-    loadOrders();
-    setTimeout(() => setActionMsg(''), 4000);
   };
 
   const refillOrder = async (order) => {
