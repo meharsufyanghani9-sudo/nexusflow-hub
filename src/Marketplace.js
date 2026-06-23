@@ -93,9 +93,11 @@ export default function Marketplace({ user, onNav }) {
   const [selected,   setSelected]   = useState(null);
   const [link,       setLink]       = useState('');
   const [qty,        setQty]        = useState('');
-  const [ordering,   setOrdering]   = useState(false);
-  const [ordered,    setOrdered]    = useState(false);
-  const [orderError, setOrderError] = useState('');
+  const [ordering,     setOrdering]     = useState(false);
+  const [ordered,      setOrdered]      = useState(false);
+  const [orderError,   setOrderError]   = useState('');
+  // 'success' | 'auto_refunded' | '' — set after placeOrder completes
+  const [orderResult,  setOrderResult]  = useState('');
 
   // ─────────────────────────────────────────────────────
   // Load everything on mount
@@ -489,6 +491,35 @@ export default function Marketplace({ user, onNav }) {
     });
 
     if (selected.provider_api_url && selected.provider_api_key && selected.provider_service_id) {
+      // ── Helper: auto-cancel order and refund the user ──────────────────────
+      // Called whenever the provider rejects or cannot accept this order so the
+      // order never gets stuck in "pending" with no path to resolution.
+      const autoRefundAndCancel = async (noteMsg) => {
+        // 1. Mark order cancelled with a note explaining what happened
+        await supabase.from('orders').update({
+          status:        'cancelled',
+          provider_note: noteMsg,
+        }).eq('order_ref', orderRef);
+
+        // 2. Refund the full cost back to the user's balance
+        const { data: freshUser } = await supabase
+          .from('users').select('balance').eq('id', user.id).single();
+        if (freshUser) {
+          const refundedBalance = parseFloat(freshUser.balance || 0) + totalCost;
+          await supabase.from('users').update({ balance: refundedBalance }).eq('id', user.id);
+          await supabase.from('transactions').insert({
+            user_id:     user.id,
+            type:        'refund',
+            amount:      totalCost,
+            description: `Auto-refund: ${selected.name} — ${noteMsg}`,
+            ref_id:      orderRef,
+          });
+        }
+        // Signal the modal to show the auto-refund outcome
+        setOrderResult('auto_refunded');
+      };
+      // ──────────────────────────────────────────────────────────────────────
+
       try {
         const res = await fetch('/api/proxy', {
           method: 'POST',
@@ -504,24 +535,44 @@ export default function Marketplace({ user, onNav }) {
         });
         if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
         const providerData = await res.json();
+
         if (providerData && providerData.order) {
+          // ✅ Success — provider accepted the order
           await supabase.from('orders').update({
             vendor_order_id: String(providerData.order),
             status:          'in_progress',
           }).eq('order_ref', orderRef);
+          setOrderResult('success');
+
         } else if (providerData && providerData.error) {
-          await supabase.from('orders').update({
-            provider_note: `Provider error: ${providerData.error}`,
-          }).eq('order_ref', orderRef);
+          // ❌ Provider returned a known error (service removed, invalid ID, etc.)
+          // Auto-cancel + refund so the user is never stuck in pending.
+          const errMsg = String(providerData.error);
+          const isServiceGone =
+            /service\s*(not|no longer|doesn'?t|does\s*not)\s*(exist|available|found)/i.test(errMsg) ||
+            /invalid\s*service/i.test(errMsg) ||
+            /service.*removed/i.test(errMsg) ||
+            /not\s*found/i.test(errMsg);
+
+          if (isServiceGone) {
+            await autoRefundAndCancel(`Service unavailable at provider: ${errMsg}`);
+          } else {
+            // Other provider error — still auto-cancel & refund; admin can investigate
+            await autoRefundAndCancel(`Provider rejected order: ${errMsg}`);
+          }
+
         } else if (providerData && providerData.raw) {
-          await supabase.from('orders').update({
-            provider_note: `Unexpected response: ${providerData.raw.slice(0, 100)}`,
-          }).eq('order_ref', orderRef);
+          // Unexpected non-JSON response — treat as failure, refund user
+          await autoRefundAndCancel(`Unexpected provider response: ${providerData.raw.slice(0, 120)}`);
+
+        } else {
+          // Empty or unrecognised response — treat as failure, refund user
+          await autoRefundAndCancel('Provider returned no order ID. Order could not be placed.');
         }
+
       } catch (e) {
-        await supabase.from('orders').update({
-          provider_note: `Auto-send failed: ${e.message}`,
-        }).eq('order_ref', orderRef);
+        // Network / proxy error — auto-cancel & refund so user is not stuck
+        await autoRefundAndCancel(`Could not reach provider: ${e.message}`);
       }
     }
 
@@ -530,9 +581,10 @@ export default function Marketplace({ user, onNav }) {
     setTimeout(() => {
       setSelected(null);
       setOrdered(false);
+      setOrderResult('');
       setLink('');
       setQty('');
-    }, 2500);
+    }, 3500);
   };
 
   // ─────────────────────────────────────────────────────
@@ -1191,8 +1243,33 @@ export default function Marketplace({ user, onNav }) {
               </div>
             )}
 
-            {/* Order placed success */}
+            {/* Order placed success / auto-refund notification */}
             {ordered ? (
+              orderResult === 'auto_refunded' ? (
+                <div style={{ textAlign: 'center', padding: '30px 0' }}>
+                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>⚠️</div>
+                  <div style={{
+                    color: 'var(--gold)', fontWeight: 700,
+                    fontSize: '15px', marginBottom: '8px',
+                  }}>
+                    Order Automatically Refunded
+                  </div>
+                  <div style={{
+                    color: 'var(--text2)', fontSize: '12px', lineHeight: 1.6,
+                    maxWidth: '280px', margin: '0 auto',
+                  }}>
+                    This service is currently unavailable at the provider.
+                    Your full payment has been returned to your balance.
+                  </div>
+                  <div style={{
+                    marginTop: '12px', padding: '8px 14px', borderRadius: '8px',
+                    background: 'rgba(255,200,0,.08)', border: '1px solid rgba(255,200,0,.2)',
+                    fontSize: '11px', color: 'var(--gold)',
+                  }}>
+                    💰 Refund credited to your balance
+                  </div>
+                </div>
+              ) : (
               <div style={{ textAlign: 'center', padding: '30px 0' }}>
                 <div style={{ fontSize: '40px', marginBottom: '12px' }}>✅</div>
                 <div style={{
@@ -1205,6 +1282,7 @@ export default function Marketplace({ user, onNav }) {
                   Processing automatically...
                 </div>
               </div>
+              ))
             ) : (
               <>
                 <div className="fi">
