@@ -42,6 +42,8 @@ const AdminSupport      = lazy(() => import('./AdminSupport'));
 const AdminCurrencies   = lazy(() => import('./AdminCurrencies'));
 const AdminMassEmail    = lazy(() => import('./AdminMassEmail'));
 const AdminCreateReseller = lazy(() => import('./AdminCreateReseller'));
+const AdminOrderSync      = lazy(() => import('./AdminOrderSync'));
+const AdminProviderSync   = lazy(() => import('./AdminProviderSync'));
 
 const ResellerDashboard = lazy(() => import('./ResellerDashboard'));
 const ResellerServices  = lazy(() => import('./ResellerServices'));
@@ -317,7 +319,9 @@ export default function App() {
       if (page === 'currencies')   return <AdminCurrencies  user={user} />;
       if (page === 'massemail')    return <AdminMassEmail   user={user} />;
       if (page === 'createreseller') return <AdminCreateReseller />;
-      if (page === 'profile')      return <Profile user={user} onLogout={logout} />;
+      if (page === 'ordersync')      return <AdminOrderSync      user={user} />;
+      if (page === 'providersync')   return <AdminProviderSync   user={user} />;
+      if (page === 'profile')        return <Profile user={user} onLogout={logout} />;
     }
 
     if (user.role === 'reseller') {
