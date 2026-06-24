@@ -1,4 +1,4 @@
-/**
+//**
  * AdminOrderSync.js
  *
  * Solves the core SMM panel issue: when a provider removes or changes a service,
