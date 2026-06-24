@@ -250,7 +250,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString(),
-      signal: AbortSignal.timeout ? AbortSignal.timeout(15_000) : undefined,
+      signal: AbortSignal.timeout ? AbortSignal.timeout(25_000) : undefined,
     });
 
     const text = await response.text();
