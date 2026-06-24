@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 import { useCurrency } from './CurrencyContext';
 
 // ─────────────────────────────────────────────────────────
-// Platform icons and colors
+/ Platform icons and colors
 // ─────────────────────────────────────────────────────────
 const platformIcons = {
   instagram: '📸', tiktok: '🎵', youtube: '▶️',  twitter: '🐦',
