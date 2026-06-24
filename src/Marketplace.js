@@ -354,6 +354,25 @@ export default function Marketplace({ user, onNav }) {
   // ─────────────────────────────────────────────────────
   // FILTERING + SORTING
   // ─────────────────────────────────────────────────────
+
+  // Multi-word search: splits query into words and checks
+  // every word appears somewhere in the service fields.
+  // "instagram fast followers" matches "Fast Instagram Followers HQ"
+  // Works on: name, platform, description, category, service ID
+  const matchesSearch = useCallback((s, rawQuery) => {
+    if (!rawQuery || !rawQuery.trim()) return true;
+    const words = rawQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const haystack = [
+      s.name                    || '',
+      s.platform                || '',
+      s.description             || '',
+      s.category                || '',
+      String(s.provider_service_id || ''),
+      String(s.id               || ''),
+    ].join(' ').toLowerCase();
+    return words.every(word => haystack.includes(word));
+  }, []);
+
   const applyFilters = useCallback((pool) => {
     let result = pool;
 
@@ -370,13 +389,7 @@ export default function Marketplace({ user, onNav }) {
       result = result.filter(s => allowed.has(s.id));
     }
     if (search.trim()) {
-      const q = search.toLowerCase().trim();
-      result = result.filter(s =>
-        (s.name        || '').toLowerCase().includes(q) ||
-        (s.platform    || '').toLowerCase().includes(q) ||
-        (s.description || '').toLowerCase().includes(q) ||
-        String(s.provider_service_id || '').includes(q)
-      );
+      result = result.filter(s => matchesSearch(s, search));
     }
     if (priceSort === 'low') {
       result = [...result].sort((a, b) => effectivePrice(a) - effectivePrice(b));
@@ -387,23 +400,19 @@ export default function Marketplace({ user, onNav }) {
     return result;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selPlatform, selServiceType, selFilterType, search, priceSort,
-      platformServiceMap, serviceTypeMap, filterTypeMap, customPrices]);
+      platformServiceMap, serviceTypeMap, filterTypeMap, customPrices, matchesSearch]);
 
   // Split into pools
   const featuredServices    = services.filter(s =>  s.is_featured);
   const nonFeaturedServices = services.filter(s => !s.is_featured);
 
-  // Featured tab: only text search applies (no platform/type filters)
+  // Featured tab: search applies (no platform/type filters)
+  // Uses same multi-word matchesSearch for consistency
   const filteredFeatured = search.trim()
-    ? featuredServices.filter(s =>
-        (s.name        || '').toLowerCase().includes(search.toLowerCase().trim()) ||
-        (s.platform    || '').toLowerCase().includes(search.toLowerCase().trim()) ||
-        (s.description || '').toLowerCase().includes(search.toLowerCase().trim()) ||
-        String(s.provider_service_id || '').includes(search.toLowerCase().trim())
-      )
+    ? featuredServices.filter(s => matchesSearch(s, search))
     : featuredServices;
 
-  // Live tab: all filters apply
+  // Live tab: all filters + search apply
   const filteredLive = applyFilters(nonFeaturedServices);
 
   const anyFilterActive = !!(
