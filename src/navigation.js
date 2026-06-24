@@ -36,6 +36,8 @@ export const pageTitles = {
   adminservices:  'Manage Services',
   adminfilters:   'Manage Filters',
   createreseller: 'Create Reseller',
+  ordersync:      'Order Sync',
+  providersync:   'Provider Auto-Sync',
 };
 
 // ─── Mobile bottom-nav items (5 max) ─────────────────────────────────────────
@@ -96,6 +98,8 @@ export const sidebarMenus = {
     { ic: '👥', lb: 'All Users',       id: 'users'        },
     { ic: '🏪', lb: 'Resellers',       id: 'resellers'    },
     { ic: '⚖️', lb: 'Disputes',        id: 'disputes'     },
+    { ic: '🔄', lb: 'Order Sync',       id: 'ordersync'    },
+    { ic: '🔁', lb: 'Provider Auto-Sync', id: 'providersync' },
     { ic: '🔌', lb: 'API Import',      id: 'api'          },
     { ic: '📋', lb: 'Manage Tasks',    id: 'admintasks'   },
     { ic: '🎁', lb: 'Referral Settings', id: 'adminreferral'},
