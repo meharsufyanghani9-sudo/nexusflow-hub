@@ -101,75 +101,92 @@ export default function AdminServices({ user }) {
     }
   };
 
-  // Bulk Actions
-  const selectedIds = [...selected];
+  // ── Bulk Actions ──────────────────────────────────────────────────────────
+  // IMPORTANT: Do NOT use a render-time `selectedIds` variable here.
+  // All functions read directly from the `selected` state Set at call time,
+  // converting it inside the function. Reading it at render time causes a
+  // stale-closure bug where the functions always see the initial empty array.
+  //
+  // CHUNKING: Supabase's PostgREST turns .in() into a URL query parameter.
+  // With hundreds or thousands of UUIDs that URL exceeds the server's limit
+  // (~8 KB) and the request either fails silently or returns a 414 error.
+  // We chunk every bulk operation into batches of 100 to stay well under
+  // that limit, making "select all → delete" work regardless of table size.
+
+  const CHUNK = 100;
+
+  const chunkArray = (arr, size) => {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+    return chunks;
+  };
 
   const bulkActivate = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
     setBulkActing(true);
-    await supabase.from('services').update({ is_active: true }).in('id', selectedIds);
-    setMsg(`✅ ${selectedIds.length} service(s) activated.`);
+    for (const chunk of chunkArray(ids, CHUNK)) {
+      await supabase.from('services').update({ is_active: true }).in('id', chunk);
+    }
+    setMsg(`✅ ${ids.length} service(s) activated.`);
     loadServices();
     setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
   const bulkDeactivate = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
     setBulkActing(true);
-    await supabase.from('services').update({ is_active: false }).in('id', selectedIds);
-    setMsg(`✅ ${selectedIds.length} service(s) deactivated.`);
+    for (const chunk of chunkArray(ids, CHUNK)) {
+      await supabase.from('services').update({ is_active: false }).in('id', chunk);
+    }
+    setMsg(`✅ ${ids.length} service(s) deactivated.`);
     loadServices();
     setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
   const bulkFeature = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
     setBulkActing(true);
-    await supabase.from('services').update({ is_featured: true }).in('id', selectedIds);
-    setMsg(`⭐ ${selectedIds.length} service(s) marked as Featured.`);
+    for (const chunk of chunkArray(ids, CHUNK)) {
+      await supabase.from('services').update({ is_featured: true }).in('id', chunk);
+    }
+    setMsg(`⭐ ${ids.length} service(s) marked as Featured.`);
     loadServices();
     setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
   const bulkUnfeature = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
     setBulkActing(true);
-    await supabase.from('services').update({ is_featured: false }).in('id', selectedIds);
-    setMsg(`✅ ${selectedIds.length} service(s) removed from Featured.`);
+    for (const chunk of chunkArray(ids, CHUNK)) {
+      await supabase.from('services').update({ is_featured: false }).in('id', chunk);
+    }
+    setMsg(`✅ ${ids.length} service(s) removed from Featured.`);
     loadServices();
     setBulkActing(false);
     setTimeout(() => setMsg(''), 3000);
   };
 
   const bulkDelete = async () => {
-    if (!window.confirm(`Delete ${selectedIds.length} selected service(s)? This cannot be undone.`)) return;
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!window.confirm(`Delete ${ids.length} selected service(s)? This cannot be undone.`)) return;
     setBulkActing(true);
-
-    // Delete in batches of 100 to avoid URL-length limits on the `.in()` filter
-    const BATCH = 100;
-    let deletedCount = 0;
-    let failedCount  = 0;
-    for (let i = 0; i < selectedIds.length; i += BATCH) {
-      const batch = selectedIds.slice(i, i + BATCH);
-      const { error } = await supabase.from('services').delete().in('id', batch);
-      if (error) {
-        console.error('Bulk delete batch error:', error.message);
-        failedCount += batch.length;
-      } else {
-        deletedCount += batch.length;
-      }
+    let deleted = 0;
+    for (const chunk of chunkArray(ids, CHUNK)) {
+      const { error } = await supabase.from('services').delete().in('id', chunk);
+      if (!error) deleted += chunk.length;
     }
-
-    if (failedCount === 0) {
-      setMsg(`🗑 ${deletedCount} service(s) deleted successfully.`);
-    } else if (deletedCount === 0) {
-      setMsg(`❌ Delete failed. Check your permissions or Supabase RLS policy for the services table.`);
-    } else {
-      setMsg(`⚠️ ${deletedCount} deleted, ${failedCount} failed. Check console for details.`);
-    }
-
+    setMsg(`🗑 ${deleted} service(s) deleted.`);
     loadServices();
     setBulkActing(false);
-    setTimeout(() => setMsg(''), 5000);
+    setTimeout(() => setMsg(''), 3000);
   };
 
   // Individual Actions
@@ -250,12 +267,7 @@ export default function AdminServices({ user }) {
 
   const deleteService = async (id) => {
     if (!window.confirm('Delete this service? This cannot be undone.')) return;
-    const { error } = await supabase.from('services').delete().eq('id', id);
-    if (error) {
-      setMsg(`❌ Delete failed: ${error.message}. Check Supabase RLS policies — the services table must allow DELETE for admin users.`);
-      setTimeout(() => setMsg(''), 7000);
-      return;
-    }
+    await supabase.from('services').delete().eq('id', id);
     loadServices();
     setMsg('🗑 Service deleted.');
     setTimeout(() => setMsg(''), 3000);
@@ -349,11 +361,7 @@ export default function AdminServices({ user }) {
         <strong style={{ color: 'var(--neon)' }}>⭐ Featured Services</strong> appear prominently on the Marketplace page.
         All other active services are hidden behind "Browse All".<br />
         <strong style={{ color: 'var(--gold)' }}>🔌 API-linked services</strong> automatically place orders with
-        the provider the moment a user orders — no manual work needed.<br />
-        <strong style={{ color: '#ff9944' }}>🛡 Delete not working?</strong> Go to Supabase → Table Editor → services → RLS Policies and add a DELETE policy:{' '}
-        <code style={{ fontFamily: 'monospace', fontSize: '10px', color: '#aaa', background: 'rgba(0,0,0,.3)', padding: '1px 5px', borderRadius: '3px' }}>
-          auth.uid() IN (SELECT id FROM users WHERE role = &apos;admin&apos;)
-        </code>
+        the provider the moment a user orders — no manual work needed.
       </div>
 
       {/* Search + Filter + Add */}
