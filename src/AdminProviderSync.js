@@ -41,8 +41,9 @@ export default function AdminProviderSync({ user }) {
   const [log,         setLog]         = useState([]);
   const [msg,         setMsg]         = useState('');
   const [loading,     setLoading]     = useState(true);
-  const [tab,         setTab]         = useState('config');   // 'config' | 'log'
-  const [markupPct,   setMarkupPct]   = useState(0);          // global markup from settings
+  const [tab,         setTab]         = useState('config');
+  const [markupPct,   setMarkupPct]   = useState(0);
+  const [progress,    setProgress]    = useState(null);
 
   const timerRef = useRef(null);
 
@@ -97,7 +98,13 @@ export default function AdminProviderSync({ user }) {
   };
 
   // ── Core sync function ──────────────────────────────────────────────────────
-  // Exported logic so it can be called from timer OR manual button.
+  const UPSERT_CHUNK = 500;
+  const chunkArr = (arr, size) => {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  };
+
   const syncAllProviders = useCallback(async (isManual = false) => {
     if (syncing) return;
     setSyncing(true);
@@ -110,14 +117,13 @@ export default function AdminProviderSync({ user }) {
       return;
     }
 
-    addLog(`🚀 Starting sync for ${enabledProviders.length} provider(s)...`, 'info');
+    addLog(`🚀 Starting fast sync for ${enabledProviders.length} provider(s)...`, 'info');
+    setProgress({ done: 0, total: 0, phase: 'Loading your services...', provider: '' });
 
-    // Load our entire services table (just the fields we need for comparison)
     const { data: ourServices } = await supabase
       .from('services')
       .select('id, provider_service_id, provider_api_url, name, price_per_1k, min_qty, max_qty, is_active');
 
-    // Build a lookup: "providerUrl::serviceId" → our service row
     const ourMap = {};
     (ourServices || []).forEach(s => {
       if (s.provider_api_url && s.provider_service_id) {
@@ -139,41 +145,42 @@ export default function AdminProviderSync({ user }) {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-
         if (data.error) throw new Error(data.error);
         if (!Array.isArray(data)) throw new Error('Response is not an array');
-
         providerServices = data;
-        addLog(`  ✅ ${prov.name || prov.url}: fetched ${data.length} services`, 'success');
+        addLog(`  ✅ Fetched ${data.length} services — comparing...`, 'success');
+        setProgress({ done: 0, total: data.length, phase: 'Comparing services...', provider: prov.name || prov.url });
       } catch (e) {
         addLog(`  ❌ ${prov.name || prov.url}: fetch failed — ${e.message}`, 'error');
         totalErrors++;
         continue;
       }
 
-      // Build a Set of provider service IDs currently returned
-      const activeProviderIds = new Set(providerServices.map(s => String(s.service)));
-
-      // Effective markup for this provider (provider-level overrides global)
       const markup = parseFloat(prov.markup) > 0 ? parseFloat(prov.markup) : markupPct;
       const applyMarkup = (price) => {
         const p = parseFloat(price) || 0;
         return markup > 0 ? p * (1 + markup / 100) : p;
       };
 
-      // ── STEP 1: Add new + update changed services ─────────────────────────
-      for (const s of providerServices) {
-        const sid  = String(s.service);
-        const key  = `${prov.url}::${sid}`;
-        const existing = ourMap[key];
+      const activeProviderIds = new Set(providerServices.map(s => String(s.service)));
+      const toInsert = [];
+      const toUpdate = [];
 
+      let compared = 0;
+      for (const s of providerServices) {
+        compared++;
+        if (compared % 100 === 0 || compared === providerServices.length) {
+          setProgress({ done: compared, total: providerServices.length, phase: 'Comparing services...', provider: prov.name || prov.url });
+        }
+        const sid      = String(s.service);
+        const key      = `${prov.url}::${sid}`;
+        const existing = ourMap[key];
         const newPrice = applyMarkup(s.rate);
-        const newMin   = parseInt(s.min, 10)  || 10;
-        const newMax   = parseInt(s.max, 10)  || 100000;
+        const newMin   = parseInt(s.min, 10) || 10;
+        const newMax   = parseInt(s.max, 10) || 100000;
 
         if (!existing) {
-          // NEW service — insert
-          const { error } = await supabase.from('services').insert({
+          toInsert.push({
             name:                s.name,
             platform:            mapPlatform(s.category || ''),
             description:         `${s.category || 'SMM Service'} · Min: ${s.min} · Max: ${s.max}`,
@@ -189,66 +196,66 @@ export default function AdminProviderSync({ user }) {
             vendor_service_id:   sid,
             provider_note:       null,
           });
-          if (!error) {
-            addLog(`  ➕ NEW: [${sid}] ${s.name}`, 'success');
-            totalAdded++;
-          } else {
-            addLog(`  ⚠️ Insert failed [${sid}]: ${error.message}`, 'warn');
-          }
-
         } else {
-          // EXISTING — check if anything changed
           const priceChanged = Math.abs(existing.price_per_1k - newPrice) > 0.0001;
           const minChanged   = existing.min_qty !== newMin;
           const maxChanged   = existing.max_qty !== newMax;
           const wasInactive  = existing.is_active === false;
-
           if (priceChanged || minChanged || maxChanged || wasInactive) {
-            const updatePayload = {};
-            if (priceChanged) updatePayload.price_per_1k = newPrice;
-            if (minChanged)   updatePayload.min_qty      = newMin;
-            if (maxChanged)   updatePayload.max_qty      = newMax;
-            if (wasInactive)  {
-              updatePayload.is_active     = true;
-              updatePayload.provider_note = null; // clear old "removed" note
-            }
-            // Always refresh the api key in case it rotated
-            updatePayload.provider_api_key = prov.key;
-
-            const { error } = await supabase.from('services')
-              .update(updatePayload).eq('id', existing.id);
-
-            if (!error) {
-              const changes = [];
-              if (priceChanged) changes.push(`price $${existing.price_per_1k.toFixed(4)}→$${newPrice.toFixed(4)}`);
-              if (minChanged)   changes.push(`min ${existing.min_qty}→${newMin}`);
-              if (maxChanged)   changes.push(`max ${existing.max_qty}→${newMax}`);
-              if (wasInactive)  changes.push('re-activated');
-              addLog(`  ✏️ UPDATED: [${sid}] ${s.name} (${changes.join(', ')})`, 'info');
-              totalUpdated++;
-            }
+            toUpdate.push({
+              id:               existing.id,
+              price_per_1k:     newPrice,
+              min_qty:          newMin,
+              max_qty:          newMax,
+              is_active:        true,
+              provider_note:    null,
+              provider_api_key: prov.key,
+            });
           }
         }
       }
 
-      // ── STEP 2: Deactivate services no longer on provider ─────────────────
-      const ourProviderServices = (ourServices || []).filter(
-        s => s.provider_api_url === prov.url && s.is_active
-      );
-
-      for (const s of ourProviderServices) {
-        if (!activeProviderIds.has(s.provider_service_id)) {
-          await supabase.from('services').update({
-            is_active:     false,
-            provider_note: `Removed from provider on ${new Date().toLocaleDateString()}`,
-          }).eq('id', s.id);
-          addLog(`  🚫 REMOVED: [${s.provider_service_id}] ${s.name} — deactivated`, 'warn');
-          totalDeactivated++;
+      if (toInsert.length > 0) {
+        addLog(`  ➕ Inserting ${toInsert.length} new services in bulk...`, 'info');
+        let inserted = 0;
+        for (const chunk of chunkArr(toInsert, UPSERT_CHUNK)) {
+          const { error } = await supabase.from('services').insert(chunk);
+          if (!error) { totalAdded += chunk.length; inserted += chunk.length; }
+          else addLog(`  ⚠️ Insert batch error: ${error.message}`, 'warn');
+          setProgress({ done: inserted, total: toInsert.length, phase: 'Inserting new services...', provider: prov.name || prov.url });
         }
+      }
+
+      if (toUpdate.length > 0) {
+        addLog(`  ✏️ Updating ${toUpdate.length} changed services in bulk...`, 'info');
+        let updated = 0;
+        for (const chunk of chunkArr(toUpdate, UPSERT_CHUNK)) {
+          const { error } = await supabase.from('services').upsert(chunk, { onConflict: 'id' });
+          if (!error) { totalUpdated += chunk.length; updated += chunk.length; }
+          else addLog(`  ⚠️ Update batch error: ${error.message}`, 'warn');
+          setProgress({ done: updated, total: toUpdate.length, phase: 'Updating changed services...', provider: prov.name || prov.url });
+        }
+      }
+
+      const toDeactivateIds = (ourServices || [])
+        .filter(s => s.provider_api_url === prov.url && s.is_active && !activeProviderIds.has(s.provider_service_id))
+        .map(s => s.id);
+
+      if (toDeactivateIds.length > 0) {
+        addLog(`  🚫 Deactivating ${toDeactivateIds.length} removed services...`, 'warn');
+        for (const chunk of chunkArr(toDeactivateIds, UPSERT_CHUNK)) {
+          await supabase.from('services')
+            .update({ is_active: false, provider_note: `Removed from provider on ${new Date().toLocaleDateString()}` })
+            .in('id', chunk);
+        }
+        totalDeactivated += toDeactivateIds.length;
+      }
+
+      if (toInsert.length === 0 && toUpdate.length === 0 && toDeactivateIds.length === 0) {
+        addLog('  ✅ Everything up to date — no changes needed', 'success');
       }
     }
 
-    // ── Save last-sync metadata ──────────────────────────────────────────────
     const now    = new Date().toISOString();
     const result = { added: totalAdded, updated: totalUpdated, deactivated: totalDeactivated, errors: totalErrors, at: now };
     await supabase.from('settings').upsert({ key: LAST_SYNC_KEY,   value: now                    }, { onConflict: 'key' });
@@ -256,12 +263,9 @@ export default function AdminProviderSync({ user }) {
 
     setLastSync(now);
     setLastResult(result);
-
-    addLog(
-      `✅ Sync complete — added: ${totalAdded}, updated: ${totalUpdated}, deactivated: ${totalDeactivated}, errors: ${totalErrors}`,
-      'success'
-    );
+    addLog(`✅ Sync complete — added: ${totalAdded}, updated: ${totalUpdated}, deactivated: ${totalDeactivated}, errors: ${totalErrors}`, 'success');
     setSyncing(false);
+    setProgress(null);
     if (isManual) flash('✅ Sync complete! Check the log for details.');
   }, [providers, syncing, markupPct, addLog, flash]);
 
@@ -389,6 +393,51 @@ export default function AdminProviderSync({ user }) {
           🔃 Refresh
         </button>
       </div>
+
+      {/* ── Live Progress Bar ── */}
+      {syncing && progress && (
+        <div style={{
+          background: 'rgba(0,0,0,.35)', border: '1px solid rgba(0,212,255,.2)',
+          borderRadius: '10px', padding: '14px 16px', marginBottom: '18px',
+        }}>
+          {/* Provider name + phase */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--neon)' }}>
+              {progress.provider || 'Syncing...'}
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--text3)' }}>
+              {progress.phase}
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div style={{
+            background: 'rgba(255,255,255,.06)', borderRadius: '20px',
+            height: '8px', overflow: 'hidden', marginBottom: '8px',
+          }}>
+            <div style={{
+              height: '100%', borderRadius: '20px',
+              background: 'linear-gradient(90deg, var(--neon), #00ff88)',
+              width: progress.total > 0 ? `${Math.round((progress.done / progress.total) * 100)}%` : '100%',
+              transition: 'width 0.3s ease',
+            }} />
+          </div>
+
+          {/* Counter */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--green)' }}>
+              {progress.total > 0
+                ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} services`
+                : progress.phase}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--neon)', fontWeight: 800 }}>
+              {progress.total > 0
+                ? `${Math.round((progress.done / progress.total) * 100)}%`
+                : '...'}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="atbs" style={{ marginBottom: '18px' }}>
