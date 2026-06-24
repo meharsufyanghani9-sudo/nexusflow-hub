@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import './style.css';
 import { supabase } from './supabase';
-// REFACTOR Phase-15: nav data centralised — no longer duplicated across App/Topbar/Sidebar
+/ REFACTOR Phase-15: nav data centralised — no longer duplicated across App/Topbar/Sidebar
 import { pageTitles, buyerNav, resellerNav, adminNav } from './navigation';
 
 // ─── Always-loaded (tiny shell components, needed on every screen) ────────────
