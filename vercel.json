@@ -3,6 +3,11 @@
   "buildCommand": "react-scripts build",
   "outputDirectory": "build",
   "framework": "create-react-app",
+  "functions": {
+    "api/proxy.js": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
