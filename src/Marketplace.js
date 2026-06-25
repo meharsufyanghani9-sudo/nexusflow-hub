@@ -401,9 +401,17 @@ export default function Marketplace({ user, onNav }) {
       result = result.filter(s => matchesSearch(s, search));
     }
     if (priceSort === 'low') {
-      result = [...result].sort((a, b) => effectivePrice(a) - effectivePrice(b));
+      result = [...result].sort((a, b) => {
+        const pa = customPrices[a.id] != null ? parseFloat(customPrices[a.id]) : parseFloat(a.price_per_1k || 0);
+        const pb = customPrices[b.id] != null ? parseFloat(customPrices[b.id]) : parseFloat(b.price_per_1k || 0);
+        return pa - pb;
+      });
     } else if (priceSort === 'high') {
-      result = [...result].sort((a, b) => effectivePrice(b) - effectivePrice(a));
+      result = [...result].sort((a, b) => {
+        const pa = customPrices[a.id] != null ? parseFloat(customPrices[a.id]) : parseFloat(a.price_per_1k || 0);
+        const pb = customPrices[b.id] != null ? parseFloat(customPrices[b.id]) : parseFloat(b.price_per_1k || 0);
+        return pb - pa;
+      });
     }
 
     return result;
