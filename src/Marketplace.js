@@ -24,7 +24,27 @@ const platformColors = {
 // ─────────────────────────────────────────────────────────
 // Infinite scroll page size
 // ─────────────────────────────────────────────────────────
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 40;
+
+// ── Skeleton card shown while services load ───────────────────────────────
+const SkeletonCard = ({ compact }) => (
+  <div className={`mkt-card${compact ? ' mkt-card-compact' : ''}`}
+    style={{ pointerEvents: 'none', animation: 'pulse 1.4s ease-in-out infinite' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+      <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--gl)' }} />
+      <div style={{ width: 50, height: 14, borderRadius: 4, background: 'var(--gl)' }} />
+    </div>
+    <div style={{ height: 12, background: 'var(--gl)', borderRadius: 4, marginBottom: 4 }} />
+    <div style={{ height: 10, background: 'var(--gl)', borderRadius: 4, width: '70%', marginBottom: 8 }} />
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'auto' }}>
+      <div style={{ height: 18, width: 60, background: 'var(--gl)', borderRadius: 4 }} />
+      <div style={{ height: 14, width: 40, background: 'var(--gl)', borderRadius: 4 }} />
+    </div>
+    <div style={{ height: 28, background: 'var(--gl)', borderRadius: 6, marginTop: 8 }} />
+  </div>
+);
+
+
 
 // ─────────────────────────────────────────────────────────
 // Helper: convert hex color to "r,g,b" string for rgba()
@@ -197,27 +217,39 @@ export default function Marketplace({ user, onNav }) {
       }
       setServices(allSvc);
 
-      // ── Stage 1: platforms ────────────────────────────────
-      const { data: plats } = await supabase
-        .from('filter_platforms')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order')
-        .order('created_at');
-      setFilterPlatforms(plats || []);
+      // ── Load ALL filter data in PARALLEL ─────────────────
+      // Previously sequential (one after another = slow).
+      // Now all requests fire at the same time with Promise.all.
+      const [
+        platsRes,
+        platSvcRows,
+        platStRows,
+        svcTypesRes,
+        svcTypeSvcRows,
+        stFtRows,
+        ftypesRes,
+        ftypeSvcRows,
+        priceRows,
+      ] = await Promise.all([
+        supabase.from('filter_platforms').select('*').eq('is_active', true).order('sort_order').order('created_at'),
+        fetchAll('filter_platform_services'),
+        fetchAll('filter_platform_service_types', '*', true),
+        supabase.from('filter_service_types').select('*').eq('is_active', true).order('sort_order').order('created_at'),
+        fetchAll('filter_service_type_services'),
+        fetchAll('filter_service_type_filter_types', '*', true),
+        supabase.from('filter_types').select('*').eq('is_active', true).order('sort_order').order('created_at'),
+        fetchAll('filter_type_services'),
+        fetchAll('service_custom_prices'),
+      ]);
 
-      // platform → services (can be > 1000 rows)
-      const platSvcRows = await fetchAll('filter_platform_services');
+      // ── Stage 1: platforms ────────────────────────────────
+      setFilterPlatforms(platsRes.data || []);
       const pm = {};
       platSvcRows.forEach(r => {
         if (!pm[r.platform_id]) pm[r.platform_id] = new Set();
         pm[r.platform_id].add(r.service_id);
       });
       setPlatformServiceMap(pm);
-
-      // platform → directly linked service types (admin-controlled Stage 1→2)
-      // optional=true: won't crash if SQL migration not run yet
-      const platStRows = await fetchAll('filter_platform_service_types', '*', true);
       const pstm = {};
       platStRows.forEach(r => {
         if (!pstm[r.platform_id]) pstm[r.platform_id] = new Set();
@@ -226,26 +258,13 @@ export default function Marketplace({ user, onNav }) {
       setPlatformServiceTypeMap(pstm);
 
       // ── Stage 2: service types ────────────────────────────
-      const { data: svcTypes } = await supabase
-        .from('filter_service_types')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order')
-        .order('created_at');
-      setFilterServiceTypes(svcTypes || []);
-
-      // service type → services (can be > 1000 rows)
-      const svcTypeSvcRows = await fetchAll('filter_service_type_services');
+      setFilterServiceTypes(svcTypesRes.data || []);
       const stm = {};
       svcTypeSvcRows.forEach(r => {
         if (!stm[r.service_type_id]) stm[r.service_type_id] = new Set();
         stm[r.service_type_id].add(r.service_id);
       });
       setServiceTypeMap(stm);
-
-      // service type → directly linked filter types (admin-controlled Stage 2→3)
-      // optional=true: won't crash if SQL migration not run yet
-      const stFtRows = await fetchAll('filter_service_type_filter_types', '*', true);
       const stftm = {};
       stFtRows.forEach(r => {
         if (!stftm[r.service_type_id]) stftm[r.service_type_id] = new Set();
@@ -254,16 +273,7 @@ export default function Marketplace({ user, onNav }) {
       setServiceTypeFilterTypeMap(stftm);
 
       // ── Stage 3: filter types ─────────────────────────────
-      const { data: ftypes } = await supabase
-        .from('filter_types')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order')
-        .order('created_at');
-      setFilterTypes(ftypes || []);
-
-      // filter type → services (can be > 1000 rows)
-      const ftypeSvcRows = await fetchAll('filter_type_services');
+      setFilterTypes(ftypesRes.data || []);
       const ftm = {};
       ftypeSvcRows.forEach(r => {
         if (!ftm[r.filter_type_id]) ftm[r.filter_type_id] = new Set();
@@ -271,8 +281,7 @@ export default function Marketplace({ user, onNav }) {
       });
       setFilterTypeMap(ftm);
 
-      // custom prices (can be > 1000 rows)
-      const priceRows = await fetchAll('service_custom_prices');
+      // ── Custom prices ─────────────────────────────────────
       const cp = {};
       priceRows.forEach(r => { cp[r.service_id] = r.custom_price; });
       setCustomPrices(cp);
@@ -572,21 +581,14 @@ export default function Marketplace({ user, onNav }) {
   };
 
   // ─────────────────────────────────────────────────────
-  // ServiceCard — shared card component
-  // compact=true → smaller card for Featured tab 2-col grid
-  // ─────────────────────────────────────────────────────
-  const ServiceCard = ({ s, compact }) => {
-    const price     = effectivePrice(s);
-    const hasCustom = customPrices[s.id] != null;
+  // ServiceCard — memoized so it never re-renders unless the service changes
+  const ServiceCard = React.memo(({ s, compact, onSelect, fmt, custPrice }) => {
+    const price     = custPrice != null ? parseFloat(custPrice) : parseFloat(s.price_per_1k);
+    const hasCustom = custPrice != null;
     return (
       <div
         className={`mkt-card${compact ? ' mkt-card-compact' : ''} ${s.is_featured ? 'mkt-featured' : ''}`}
-        onClick={() => {
-          setSelected(s);
-          setLink('');
-          setQty(s.min_qty);
-          setOrderError('');
-        }}>
+        onClick={() => onSelect(s)}>
         {/* FEATURED badge */}
         {s.is_featured && (
           <div style={{
@@ -638,7 +640,7 @@ export default function Marketplace({ user, onNav }) {
               fontFamily: 'var(--fm)', fontSize: compact ? '11px' : '13px',
               fontWeight: 700, color: 'var(--gold)',
             }}>
-              {format(price)}
+              {fmt(price)}
             </div>
             <div style={{ fontSize: '8px', color: 'var(--text3)' }}>per 1,000</div>
             {hasCustom && (
@@ -668,7 +670,15 @@ export default function Marketplace({ user, onNav }) {
         </button>
       </div>
     );
-  };
+  });
+
+
+  const handleSelect = useCallback((s) => {
+    setSelected(s);
+    setLink('');
+    setQty(s.min_qty);
+    setOrderError('');
+  }, []);
 
   // ─────────────────────────────────────────────────────
   // RENDER
@@ -988,9 +998,10 @@ export default function Marketplace({ user, onNav }) {
       {/* LOADING STATE                                     */}
       {/* ════════════════════════════════════════════════ */}
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>
-          <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>
-          Loading services...
+        <div>
+          <div className="mkt-grid" style={{ marginBottom: '12px' }}>
+            {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
         </div>
       ) : (
         <>
@@ -1034,7 +1045,7 @@ export default function Marketplace({ user, onNav }) {
                   {/* Compact 2-col featured grid */}
                   <div className="mkt-grid-featured">
                     {visibleFeatured.map(s => (
-                      <ServiceCard key={s.id} s={s} compact={true} />
+                      <ServiceCard key={s.id} s={s} compact={true} onSelect={handleSelect} fmt={format} custPrice={customPrices[s.id]} />
                     ))}
                   </div>
 
@@ -1111,7 +1122,7 @@ export default function Marketplace({ user, onNav }) {
                   </div>
 
                   <div className="mkt-grid">
-                    {visibleLive.map(s => <ServiceCard key={s.id} s={s} />)}
+                    {visibleLive.map(s => <ServiceCard key={s.id} s={s} onSelect={handleSelect} fmt={format} custPrice={customPrices[s.id]} />)}
                   </div>
 
                   {hasMoreLive && (
