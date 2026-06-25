@@ -176,8 +176,8 @@ export default function AdminProviderSync({ user }) {
         const key      = `${prov.url}::${sid}`;
         const existing = ourMap[key];
         const newPrice = applyMarkup(s.rate);
-        const newMin   = parseInt(s.min, 10) || 10;
-        const newMax   = parseInt(s.max, 10) || 100000;
+        const newMin   = Math.min(parseInt(s.min, 10) || 10,  2147483647);
+        const newMax   = Math.min(parseInt(s.max, 10) || 100000, 2147483647);
 
         if (!existing) {
           toInsert.push({
