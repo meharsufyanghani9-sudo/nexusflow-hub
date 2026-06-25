@@ -177,21 +177,25 @@ export default function Marketplace({ user, onNav }) {
       // — returns [] silently instead of crashing the whole marketplace
       // FIX Phase-8: was while(true) — capped at MAX_ITER (100 × 100,000 = 10M rows)
       const fetchAll = async (table, cols = '*', optional = false) => {
-        const JB       = 100000;
-        const MAX_ITER = 100;
+        // Supabase max per request = 1000 rows (default PostgREST limit).
+        // Requesting more than 1000 at once silently returns only 1000.
+        // We loop in pages of 1000 until we get fewer than 1000 back.
+        const PAGE = 1000;
         let rows = [];
-        let f    = 0;
-        for (let iter = 0; iter < MAX_ITER; iter++) {
+        let from = 0;
+        for (let iter = 0; iter < 500; iter++) {
           const { data, error } = await supabase
-            .from(table).select(cols).range(f, f + JB - 1);
+            .from(table)
+            .select(cols)
+            .range(from, from + PAGE - 1);
           if (error) {
             if (optional) return [];
             throw error;
           }
           if (!data || data.length === 0) break;
-          rows = [...rows, ...data];
-          if (data.length < JB) break;
-          f += JB;
+          rows = rows.concat(data);
+          if (data.length < PAGE) break;
+          from += PAGE;
         }
         return rows;
       };
