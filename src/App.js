@@ -44,6 +44,9 @@ const AdminMassEmail    = lazy(() => import('./AdminMassEmail'));
 const AdminCreateReseller = lazy(() => import('./AdminCreateReseller'));
 const AdminOrderSync      = lazy(() => import('./AdminOrderSync'));
 const AdminProviderSync   = lazy(() => import('./AdminProviderSync'));
+const AdminLiveChat       = lazy(() => import('./AdminLiveChat'));
+
+import LiveChat from './LiveChat';
 
 const ResellerDashboard = lazy(() => import('./ResellerDashboard'));
 const ResellerServices  = lazy(() => import('./ResellerServices'));
@@ -321,6 +324,7 @@ export default function App() {
       if (page === 'createreseller') return <AdminCreateReseller />;
       if (page === 'ordersync')      return <AdminOrderSync      user={user} />;
       if (page === 'providersync')   return <AdminProviderSync   user={user} />;
+      if (page === 'livechat')       return <AdminLiveChat       user={user} />;
       if (page === 'profile')        return <Profile user={user} onLogout={logout} />;
     }
 
@@ -385,6 +389,7 @@ export default function App() {
         ))}
       </nav>
       {showCurrency && <CurrencySwitcher onClose={() => setShowCurrency(false)} />}
+      {user && user.role !== 'admin' && <LiveChat user={user} />}
     </div>
   );
 }
