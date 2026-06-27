@@ -127,7 +127,7 @@ export default function AdminProviderSync({ user }) {
     const ourMap = {};
     (ourServices || []).forEach(s => {
       if (s.provider_service_id && s.provider_api_url) {
-        const normUrl = (s.provider_api_url || '').replace(/\/+$/, '');
+        const normUrl = (s.provider_api_url || '').replace(/\/+$/, '').toLowerCase().trim();
         ourMap[`${normUrl}::${s.provider_service_id}`] = s;
       }
     });
@@ -167,6 +167,8 @@ export default function AdminProviderSync({ user }) {
       const activeProviderIds = new Set(providerServices.map(s => String(s.service)));
       const toInsert = [];
       const toUpdate = [];
+      // Normalize provider URL once — used for both map lookup AND storing in DB
+      const provNormUrl = (prov.url || '').replace(/\/+$/, '').toLowerCase().trim();
 
       let compared = 0;
       for (const s of providerServices) {
@@ -175,8 +177,7 @@ export default function AdminProviderSync({ user }) {
           setProgress({ done: compared, total: providerServices.length, phase: 'Comparing services...', provider: prov.name || prov.url });
         }
         const sid      = String(s.service);
-        const normUrl  = (prov.url || '').replace(/\/+$/, '');
-        const key      = `${normUrl}::${sid}`;
+        const key      = `${provNormUrl}::${sid}`;
         const existing = ourMap[key];
         const newPrice = applyMarkup(s.rate);
         const newMin   = Math.min(parseInt(s.min, 10) || 10,  2147483647);
@@ -193,7 +194,7 @@ export default function AdminProviderSync({ user }) {
             delivery_time:       s.average_time || '1-6 hrs',
             is_active:           true,
             provider_service_id: sid,
-            provider_api_url:    prov.url,
+            provider_api_url:    provNormUrl,
             provider_api_key:    prov.key,
             provider_id:         prov.name || 'custom',
             vendor_service_id:   sid,
