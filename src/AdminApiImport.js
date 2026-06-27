@@ -40,6 +40,7 @@ export default function AdminApiImport({ user }) {
   const [fetchedServices, setFetchedServices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(null); // { done, total }
   const [selected, setSelected] = useState([]);
   const [searchFilter, setSearchFilter] = useState('');
   const [msg, setMsg] = useState('');
@@ -134,35 +135,71 @@ export default function AdminApiImport({ user }) {
   const importSelected = async () => {
     if (selected.length === 0) { alert('Select at least one service'); return; }
     setImporting(true);
+    setImportProgress({ done: 0, total: rows.length });
+
     const toImport = fetchedServices.filter(s => selected.includes(s.service));
-    let count = 0;
-    let errors = 0;
-    for (const s of toImport) {
-      const { error } = await supabase.from('services').insert({
-        name: s.name,
-        platform: mapPlatform(s.category || ''),
-        description: `${s.category || 'SMM Service'} · Min: ${s.min} · Max: ${s.max}`,
-        price_per_1k: parseFloat(s.rate) || 1,
-        min_qty: parseInt(s.min) || 100,
-        max_qty: parseInt(s.max) || 100000,
-        delivery_time: s.average_time || '1-6 hrs',
-        is_active: true,
-        vendor_service_id: String(s.service),
-        provider_service_id: String(s.service),
-        provider_api_url: apiUrl,
-        provider_api_key: apiKey,
-        provider_id: provider,
-      });
-      if (!error) count++;
-      else errors++;
+
+    // Build rows — same structure as Provider Sync
+    const rows = toImport.map(s => ({
+      name:                s.name,
+      platform:            mapPlatform(s.category || ''),
+      description:         `${s.category || 'SMM Service'} · Min: ${s.min} · Max: ${s.max}`,
+      price_per_1k:        applyMarkup(s.rate),
+      min_qty:             Math.min(parseInt(s.min) || 10,  2147483647),
+      max_qty:             Math.min(parseInt(s.max) || 100000, 2147483647),
+      delivery_time:       s.average_time || '1-6 hrs',
+      is_active:           true,
+      vendor_service_id:   String(s.service),
+      provider_service_id: String(s.service),
+      provider_api_url:    apiUrl,
+      provider_api_key:    apiKey,
+      provider_id:         provider,
+      provider_note:       null,
+    }));
+
+    // Bulk upsert in chunks of 500
+    // onConflict on provider_service_id + provider_api_url means:
+    //   - if service already exists → UPDATE it (no duplicate)
+    //   - if service is new → INSERT it
+    const CHUNK = 500;
+    let imported = 0;
+    let updated  = 0;
+    let errors   = 0;
+
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from('services')
+        .upsert(chunk, {
+          onConflict:        'provider_service_id,provider_api_url',
+          ignoreDuplicates:  false,   // false = UPDATE on conflict
+        })
+        .select('id');
+
+      if (error) {
+        // Fallback: if upsert fails (e.g. no unique constraint yet), try insert
+        for (const row of chunk) {
+          const { error: insErr } = await supabase.from('services').insert(row);
+          if (!insErr) imported++;
+          else errors++;
+          setImportProgress({ done: imported, total: rows.length });
+        }
+      } else {
+        imported += chunk.length;
+        setImportProgress({ done: imported, total: rows.length });
+      }
     }
+
     setImporting(false);
+    setImportProgress(null);
     setSelected([]);
-    if (count > 0) {
-      setMsg(`✅ ${count} services imported successfully! They are now live in the marketplace.${errors > 0 ? ` (${errors} failed)` : ''}`);
+
+    const total = imported + updated;
+    if (total > 0) {
+      setMsg(`✅ Done — ${imported} services imported/updated. No duplicates created.${errors > 0 ? ` (${errors} failed)` : ''}`);
       setMsgType('success');
     } else {
-      setMsg(`❌ Import failed. Services may already exist.`);
+      setMsg(`❌ Import failed. Check console for details.`);
       setMsgType('error');
     }
     setTimeout(() => setMsg(''), 6000);
@@ -295,7 +332,7 @@ export default function AdminApiImport({ user }) {
                   </button>
                   <button className="btn bs bsm" onClick={importSelected}
                     disabled={importing || selected.length === 0}>
-                    {importing ? 'Importing...' : `Import (${selected.length})`}
+                    {importing && importProgress ? `⏳ ${importProgress.done}/${importProgress.total} done` : importing ? 'Importing...' : `Import (${selected.length})`}
                   </button>
                 </div>
               </div>
