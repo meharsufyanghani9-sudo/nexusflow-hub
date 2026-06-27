@@ -127,11 +127,11 @@ export default function AdminProviderSync({ user }) {
     const ourMap = {};
     (ourServices || []).forEach(s => {
       if (s.provider_service_id && s.provider_api_url) {
-        // Normalize URL: trim trailing slash for reliable matching
         const normUrl = (s.provider_api_url || '').replace(/\/+$/, '');
         ourMap[`${normUrl}::${s.provider_service_id}`] = s;
       }
     });
+    addLog(`📊 DB has ${(ourServices||[]).length} total services, ${Object.keys(ourMap).length} indexed in map`, 'info');
 
     let totalAdded = 0, totalUpdated = 0, totalDeactivated = 0, totalErrors = 0;
 
@@ -220,11 +220,9 @@ export default function AdminProviderSync({ user }) {
         }
       }
 
+      addLog(`  🔍 Compared ${providerServices.length} provider services: ${toInsert.length} not in DB, ${toUpdate.length} changed, ${providerServices.length - toInsert.length - toUpdate.length} unchanged`, 'info');
+
       if (toInsert.length > 0) {
-        // Genuinely new = not in ourMap at all
-        // Already exist = in toInsert because ourMap missed them (e.g. case mismatch)
-        // Since upsert handles both, just count toInsert as added — the number
-        // shown in the stat card comes from the DB diff, not our counter.
         addLog(`  ➕ Upserting ${toInsert.length} services...`, 'info');
         let inserted = 0;
         for (const chunk of chunkArr(toInsert, UPSERT_CHUNK)) {
