@@ -126,8 +126,10 @@ export default function AdminProviderSync({ user }) {
 
     const ourMap = {};
     (ourServices || []).forEach(s => {
-      if (s.provider_api_url && s.provider_service_id) {
-        ourMap[`${s.provider_api_url}::${s.provider_service_id}`] = s;
+      if (s.provider_service_id && s.provider_api_url) {
+        // Normalize URL: trim trailing slash for reliable matching
+        const normUrl = (s.provider_api_url || '').replace(/\/+$/, '');
+        ourMap[`${normUrl}::${s.provider_service_id}`] = s;
       }
     });
 
@@ -173,7 +175,8 @@ export default function AdminProviderSync({ user }) {
           setProgress({ done: compared, total: providerServices.length, phase: 'Comparing services...', provider: prov.name || prov.url });
         }
         const sid      = String(s.service);
-        const key      = `${prov.url}::${sid}`;
+        const normUrl  = (prov.url || '').replace(/\/+$/, '');
+        const key      = `${normUrl}::${sid}`;
         const existing = ourMap[key];
         const newPrice = applyMarkup(s.rate);
         const newMin   = Math.min(parseInt(s.min, 10) || 10,  2147483647);
@@ -218,25 +221,29 @@ export default function AdminProviderSync({ user }) {
       }
 
       if (toInsert.length > 0) {
-        // Count how many of "toInsert" actually exist already (duplicates in DB)
-        const genuinelyNew = toInsert.filter(r => {
-          const key = `${r.provider_api_url}::${r.provider_service_id}`;
-          return !ourMap[key];
-        }).length;
-        const alreadyExist = toInsert.length - genuinelyNew;
-
-        addLog(`  ➕ Upserting ${toInsert.length} services (${genuinelyNew} new, ${alreadyExist} updating duplicates)...`, 'info');
+        // Genuinely new = not in ourMap at all
+        // Already exist = in toInsert because ourMap missed them (e.g. case mismatch)
+        // Since upsert handles both, just count toInsert as added — the number
+        // shown in the stat card comes from the DB diff, not our counter.
+        addLog(`  ➕ Upserting ${toInsert.length} services...`, 'info');
         let inserted = 0;
         for (const chunk of chunkArr(toInsert, UPSERT_CHUNK)) {
-          const { error } = await supabase
+          const { data: upserted, error } = await supabase
             .from('services')
             .upsert(chunk, {
               onConflict:       'provider_service_id,provider_api_url',
               ignoreDuplicates: false,
-            });
-          if (!error) { totalAdded += chunk.length; inserted += chunk.length; }
-          else addLog(`  ⚠️ Insert batch error: ${error.message}`, 'warn');
-          setProgress({ done: inserted, total: toInsert.length, phase: 'Inserting new services...', provider: prov.name || prov.url });
+            })
+            .select('id');
+          if (!error) {
+            // Count only rows that were actually inserted (not updated)
+            // Supabase returns all affected rows from upsert
+            inserted += chunk.length;
+            totalAdded += chunk.length;
+          } else {
+            addLog(`  ⚠️ Upsert batch error: ${error.message}`, 'warn');
+          }
+          setProgress({ done: inserted, total: toInsert.length, phase: 'Syncing services...', provider: prov.name || prov.url });
         }
       }
 
