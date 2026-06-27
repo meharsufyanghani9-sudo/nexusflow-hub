@@ -200,10 +200,12 @@ export default function AdminProviderSync({ user }) {
           const priceChanged = Math.abs(existing.price_per_1k - newPrice) > 0.0001;
           const minChanged   = existing.min_qty !== newMin;
           const maxChanged   = existing.max_qty !== newMax;
+          const nameChanged  = existing.name !== s.name;
           const wasInactive  = existing.is_active === false;
-          if (priceChanged || minChanged || maxChanged || wasInactive) {
+          if (priceChanged || minChanged || maxChanged || wasInactive || nameChanged) {
             toUpdate.push({
               id:               existing.id,
+              name:             s.name,          // required — NOT NULL
               price_per_1k:     newPrice,
               min_qty:          newMin,
               max_qty:          newMax,
