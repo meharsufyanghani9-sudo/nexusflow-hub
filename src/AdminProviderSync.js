@@ -221,7 +221,12 @@ export default function AdminProviderSync({ user }) {
         addLog(`  ➕ Inserting ${toInsert.length} new services in bulk...`, 'info');
         let inserted = 0;
         for (const chunk of chunkArr(toInsert, UPSERT_CHUNK)) {
-          const { error } = await supabase.from('services').insert(chunk);
+          const { error } = await supabase
+            .from('services')
+            .upsert(chunk, {
+              onConflict:       'provider_service_id,provider_api_url',
+              ignoreDuplicates: false,
+            });
           if (!error) { totalAdded += chunk.length; inserted += chunk.length; }
           else addLog(`  ⚠️ Insert batch error: ${error.message}`, 'warn');
           setProgress({ done: inserted, total: toInsert.length, phase: 'Inserting new services...', provider: prov.name || prov.url });
