@@ -38,6 +38,7 @@ export const pageTitles = {
   createreseller: 'Create Reseller',
   ordersync:      'Order Sync',
   providersync:   'Provider Auto-Sync',
+  livechat:       'Live Chat Support',
 };
 
 // ─── Mobile bottom-nav items (5 max) ─────────────────────────────────────────
