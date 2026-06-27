@@ -120,9 +120,20 @@ export default function AdminProviderSync({ user }) {
     addLog(`🚀 Starting fast sync for ${enabledProviders.length} provider(s)...`, 'info');
     setProgress({ done: 0, total: 0, phase: 'Loading your services...', provider: '' });
 
-    const { data: ourServices } = await supabase
-      .from('services')
-      .select('id, provider_service_id, provider_api_url, name, price_per_1k, min_qty, max_qty, is_active');
+    // Fetch ALL services in pages of 1000 to bypass Supabase's default row limit
+    let ourServices = [];
+    let svcPage = 0;
+    const SVC_PAGE = 1000;
+    while (true) {
+      const { data: svcBatch, error: svcErr } = await supabase
+        .from('services')
+        .select('id, provider_service_id, provider_api_url, name, price_per_1k, min_qty, max_qty, is_active')
+        .range(svcPage * SVC_PAGE, (svcPage + 1) * SVC_PAGE - 1);
+      if (svcErr || !svcBatch || svcBatch.length === 0) break;
+      ourServices = ourServices.concat(svcBatch);
+      if (svcBatch.length < SVC_PAGE) break;
+      svcPage++;
+    }
 
     const ourMap = {};
     (ourServices || []).forEach(s => {
