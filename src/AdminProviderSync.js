@@ -218,7 +218,14 @@ export default function AdminProviderSync({ user }) {
       }
 
       if (toInsert.length > 0) {
-        addLog(`  ➕ Inserting ${toInsert.length} new services in bulk...`, 'info');
+        // Count how many of "toInsert" actually exist already (duplicates in DB)
+        const genuinelyNew = toInsert.filter(r => {
+          const key = `${r.provider_api_url}::${r.provider_service_id}`;
+          return !ourMap[key];
+        }).length;
+        const alreadyExist = toInsert.length - genuinelyNew;
+
+        addLog(`  ➕ Upserting ${toInsert.length} services (${genuinelyNew} new, ${alreadyExist} updating duplicates)...`, 'info');
         let inserted = 0;
         for (const chunk of chunkArr(toInsert, UPSERT_CHUNK)) {
           const { error } = await supabase
