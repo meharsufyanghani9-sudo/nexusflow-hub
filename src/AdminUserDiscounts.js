@@ -107,11 +107,17 @@ export default function AdminUserDiscounts({ user }) {
     setSaving(true);
     const pct = parseFloat(globalPct);
 
-    // Always delete first — NULL in unique constraint doesn't work with upsert
-    await supabase.from('user_discounts')
+    // Step 1: delete existing global discount for this user
+    const { error: delErr } = await supabase.from('user_discounts')
       .delete()
       .eq('user_id', selUser.id)
       .is('service_id', null);
+
+    if (delErr) {
+      flash(`❌ Error: ${delErr.message} — Make sure the user_discounts table exists in Supabase.`);
+      setSaving(false);
+      return;
+    }
 
     if (isNaN(pct) || globalPct === '' || pct === 0) {
       flash('✅ Global discount removed.');
@@ -120,12 +126,17 @@ export default function AdminUserDiscounts({ user }) {
       setSaving(false);
       return;
     } else {
-      await supabase.from('user_discounts').insert({
+      const { error: insErr } = await supabase.from('user_discounts').insert({
         user_id:      selUser.id,
         service_id:   null,
         discount_pct: pct,
         note:         globalNote || null,
       });
+      if (insErr) {
+        flash(`❌ Save failed: ${insErr.message}`);
+        setSaving(false);
+        return;
+      }
       flash(`✅ Global discount of ${pct}% saved for ${selUser.full_name}.`);
     }
 
