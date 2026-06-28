@@ -121,7 +121,7 @@ export default function Marketplace({ user, onNav }) {
   // ─────────────────────────────────────────────────────
   // Load everything on mount
   // ─────────────────────────────────────────────────────
-  useEffect(() => { loadEverything(); }, []);
+  useEffect(() => { loadEverything(); }, [user?.id]); // re-run when user logs in
 
   // ─────────────────────────────────────────────────────
   // IntersectionObserver for LIVE infinite scroll
@@ -425,14 +425,22 @@ export default function Marketplace({ user, onNav }) {
     }
     if (priceSort === 'low') {
       result = [...result].sort((a, b) => {
-        const pa = customPrices[a.id] != null ? parseFloat(customPrices[a.id]) : parseFloat(a.price_per_1k || 0);
-        const pb = customPrices[b.id] != null ? parseFloat(customPrices[b.id]) : parseFloat(b.price_per_1k || 0);
+        const baseA = customPrices[a.id] != null ? parseFloat(customPrices[a.id]) : parseFloat(a.price_per_1k || 0);
+        const baseB = customPrices[b.id] != null ? parseFloat(customPrices[b.id]) : parseFloat(b.price_per_1k || 0);
+        const dA = userDiscounts.services[a.id] != null ? userDiscounts.services[a.id] : userDiscounts.global;
+        const dB = userDiscounts.services[b.id] != null ? userDiscounts.services[b.id] : userDiscounts.global;
+        const pa = dA ? baseA * (1 - dA / 100) : baseA;
+        const pb = dB ? baseB * (1 - dB / 100) : baseB;
         return pa - pb;
       });
     } else if (priceSort === 'high') {
       result = [...result].sort((a, b) => {
-        const pa = customPrices[a.id] != null ? parseFloat(customPrices[a.id]) : parseFloat(a.price_per_1k || 0);
-        const pb = customPrices[b.id] != null ? parseFloat(customPrices[b.id]) : parseFloat(b.price_per_1k || 0);
+        const baseA = customPrices[a.id] != null ? parseFloat(customPrices[a.id]) : parseFloat(a.price_per_1k || 0);
+        const baseB = customPrices[b.id] != null ? parseFloat(customPrices[b.id]) : parseFloat(b.price_per_1k || 0);
+        const dA = userDiscounts.services[a.id] != null ? userDiscounts.services[a.id] : userDiscounts.global;
+        const dB = userDiscounts.services[b.id] != null ? userDiscounts.services[b.id] : userDiscounts.global;
+        const pa = dA ? baseA * (1 - dA / 100) : baseA;
+        const pb = dB ? baseB * (1 - dB / 100) : baseB;
         return pb - pa;
       });
     }
@@ -440,7 +448,7 @@ export default function Marketplace({ user, onNav }) {
     return result;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selPlatform, selServiceType, selFilterType, search, priceSort,
-      platformServiceMap, serviceTypeMap, filterTypeMap, customPrices, matchesSearch]);
+      platformServiceMap, serviceTypeMap, filterTypeMap, customPrices, matchesSearch, userDiscounts]);
 
   // Split into pools
   const featuredServices    = services.filter(s =>  s.is_featured);
