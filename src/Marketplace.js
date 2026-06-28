@@ -325,6 +325,9 @@ export default function Marketplace({ user, onNav }) {
     return base;
   };
 
+  // displayPrice: what the user actually sees — admin custom price + user discount
+  const displayPrice = (s) => effectivePrice(s);
+
   const ic = (p) => platformIcons[(p || '').toLowerCase()]  || '⚙️';
   const cl = (p) => platformColors[(p || '').toLowerCase()] || '#7b2fff';
 
@@ -1084,7 +1087,7 @@ export default function Marketplace({ user, onNav }) {
                   {/* Compact 2-col featured grid */}
                   <div className="mkt-grid-featured">
                     {visibleFeatured.map(s => (
-                      <ServiceCard key={s.id} s={s} compact={true} onSelect={handleSelect} fmt={format} custPrice={customPrices[s.id]} />
+                      <ServiceCard key={s.id} s={s} compact={true} onSelect={handleSelect} fmt={format} custPrice={displayPrice(s)} />
                     ))}
                   </div>
 
@@ -1161,7 +1164,7 @@ export default function Marketplace({ user, onNav }) {
                   </div>
 
                   <div className="mkt-grid">
-                    {visibleLive.map(s => <ServiceCard key={s.id} s={s} onSelect={handleSelect} fmt={format} custPrice={customPrices[s.id]} />)}
+                    {visibleLive.map(s => <ServiceCard key={s.id} s={s} onSelect={handleSelect} fmt={format} custPrice={displayPrice(s)} />)}
                   </div>
 
                   {hasMoreLive && (
