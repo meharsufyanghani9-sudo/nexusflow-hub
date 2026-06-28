@@ -85,7 +85,8 @@ export default function Marketplace({ user, onNav }) {
   const [serviceTypeFilterTypeMap, setServiceTypeFilterTypeMap] = useState({});
 
   // Custom prices from admin: serviceId -> price
-  const [customPrices, setCustomPrices] = useState({});
+  const [customPrices,  setCustomPrices]  = useState({});
+  const [userDiscounts, setUserDiscounts] = useState({ global: null, services: {} });
 
   // ── User's filter selections ──────────────────────────
   const [selPlatform,    setSelPlatform]    = useState(null);
@@ -290,6 +291,22 @@ export default function Marketplace({ user, onNav }) {
       priceRows.forEach(r => { cp[r.service_id] = r.custom_price; });
       setCustomPrices(cp);
 
+      // Load user-specific discounts if logged in
+      if (user?.id) {
+        const { data: discRows } = await supabase
+          .from('user_discounts')
+          .select('service_id, discount_pct')
+          .eq('user_id', user.id);
+        if (discRows) {
+          const globalRow = discRows.find(d => d.service_id === null);
+          const svcMap    = {};
+          discRows.filter(d => d.service_id !== null).forEach(d => {
+            svcMap[d.service_id] = parseFloat(d.discount_pct);
+          });
+          setUserDiscounts({ global: globalRow ? parseFloat(globalRow.discount_pct) : null, services: svcMap });
+        }
+      }
+
     } catch (e) {
       // FIX Phase-8: surface the error in the UI instead of leaking
       // internal Supabase table/column details to the browser console.
@@ -302,8 +319,10 @@ export default function Marketplace({ user, onNav }) {
   // Effective price
   // ─────────────────────────────────────────────────────
   const effectivePrice = (s) => {
-    if (customPrices[s.id] != null) return parseFloat(customPrices[s.id]);
-    return parseFloat(s.price_per_1k);
+    const base = customPrices[s.id] != null ? parseFloat(customPrices[s.id]) : parseFloat(s.price_per_1k || 0);
+    const discPct = userDiscounts.services[s.id] != null ? userDiscounts.services[s.id] : userDiscounts.global;
+    if (discPct != null && discPct > 0) return base * (1 - discPct / 100);
+    return base;
   };
 
   const ic = (p) => platformIcons[(p || '').toLowerCase()]  || '⚙️';
