@@ -45,6 +45,7 @@ const AdminCreateReseller = lazy(() => import('./AdminCreateReseller'));
 const AdminOrderSync      = lazy(() => import('./AdminOrderSync'));
 const AdminProviderSync   = lazy(() => import('./AdminProviderSync'));
 const AdminLiveChat       = lazy(() => import('./AdminLiveChat'));
+const AdminUserDiscounts  = lazy(() => import('./AdminUserDiscounts'));
 
 import LiveChat from './LiveChat';
 
@@ -325,6 +326,7 @@ export default function App() {
       if (page === 'ordersync')      return <AdminOrderSync      user={user} />;
       if (page === 'providersync')   return <AdminProviderSync   user={user} />;
       if (page === 'livechat')       return <AdminLiveChat       user={user} />;
+      if (page === 'userdiscounts')  return <AdminUserDiscounts  user={user} />;
       if (page === 'profile')        return <Profile user={user} onLogout={logout} />;
     }
 
