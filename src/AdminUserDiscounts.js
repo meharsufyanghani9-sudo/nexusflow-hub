@@ -107,26 +107,25 @@ export default function AdminUserDiscounts({ user }) {
     setSaving(true);
     const pct = parseFloat(globalPct);
 
-    if (isNaN(pct) || globalPct === '') {
-      // Remove global discount
-      await supabase.from('user_discounts')
-        .delete()
-        .eq('user_id', selUser.id)
-        .is('service_id', null);
+    // Always delete first — NULL in unique constraint doesn't work with upsert
+    await supabase.from('user_discounts')
+      .delete()
+      .eq('user_id', selUser.id)
+      .is('service_id', null);
+
+    if (isNaN(pct) || globalPct === '' || pct === 0) {
       flash('✅ Global discount removed.');
     } else if (pct < 0 || pct > 100) {
       flash('❌ Discount must be between 0 and 100.');
       setSaving(false);
       return;
     } else {
-      await supabase.from('user_discounts')
-        .upsert({
-          user_id:      selUser.id,
-          service_id:   null,
-          discount_pct: pct,
-          note:         globalNote || null,
-          updated_at:   new Date().toISOString(),
-        }, { onConflict: 'user_id,service_id' });
+      await supabase.from('user_discounts').insert({
+        user_id:      selUser.id,
+        service_id:   null,
+        discount_pct: pct,
+        note:         globalNote || null,
+      });
       flash(`✅ Global discount of ${pct}% saved for ${selUser.full_name}.`);
     }
 
@@ -139,21 +138,20 @@ export default function AdminUserDiscounts({ user }) {
     if (!selUser) return;
     const pct = parseFloat(pctStr);
 
-    if (pctStr === '' || isNaN(pct)) {
-      // Remove override
-      await supabase.from('user_discounts')
-        .delete()
-        .eq('user_id', selUser.id)
-        .eq('service_id', serviceId);
-    } else {
-      await supabase.from('user_discounts')
-        .upsert({
-          user_id:      selUser.id,
-          service_id:   serviceId,
-          discount_pct: Math.min(100, Math.max(0, pct)),
-          updated_at:   new Date().toISOString(),
-        }, { onConflict: 'user_id,service_id' });
+    // Always delete first, then re-insert if needed
+    await supabase.from('user_discounts')
+      .delete()
+      .eq('user_id', selUser.id)
+      .eq('service_id', serviceId);
+
+    if (pctStr !== '' && !isNaN(pct) && pct > 0) {
+      await supabase.from('user_discounts').insert({
+        user_id:      selUser.id,
+        service_id:   serviceId,
+        discount_pct: Math.min(100, Math.max(0, pct)),
+      });
     }
+
     await loadAll();
   };
 
