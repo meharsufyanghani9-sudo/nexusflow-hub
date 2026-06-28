@@ -39,6 +39,7 @@ export const pageTitles = {
   ordersync:      'Order Sync',
   providersync:   'Provider Auto-Sync',
   livechat:       'Live Chat Support',
+  userdiscounts:  'User Discounts',
 };
 
 // ─── Mobile bottom-nav items (5 max) ─────────────────────────────────────────
